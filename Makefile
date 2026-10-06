@@ -2,7 +2,7 @@ APP := build/Build/Products/Debug/Muxify.app
 RELEASE_APP := build/Build/Products/Release/Muxify.app
 INSTALL_DIR ?= /Applications
 
-.PHONY: all setup tools project build test run install clean
+.PHONY: all setup tools project build test run install bench clean
 
 all: build
 
@@ -33,6 +33,9 @@ install: project
 		-derivedDataPath build -quiet build
 	rm -rf "$(INSTALL_DIR)/Muxify.app"
 	cp -R $(RELEASE_APP) "$(INSTALL_DIR)/"
+
+bench:
+	./scripts/bench.sh
 
 clean:
 	rm -rf build Muxify.xcodeproj

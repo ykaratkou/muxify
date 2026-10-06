@@ -56,3 +56,19 @@ Then open the installed app and, from the **Muxify** menu:
   `/hooks` and launch it with `codex --no-daemon`. Restart running Agents to
   load the Extension. See [extensions/README.md](extensions/README.md) for what
   each one does.
+
+## Benchmark
+
+```sh
+make bench    # run in a Pane of the terminal you want to measure
+```
+
+The script finds the terminal app that draws the Pane. It stops if another tmux
+client shows the same Window, because tmux then draws every update twice, and
+prints the command that detaches that client. Then it measures the app's idle CPU
+for 10 seconds (`IDLE_SECS`), then measures PTY throughput with
+[vtebench](https://github.com/alacritty/vtebench), which it builds with cargo on
+first use. To see what Muxify costs, run it in Muxify, then in Ghostty.app attached
+to the same Session, with the same Window size. Each run adds a line to
+`build/bench/runs.tsv`, and with `gnuplot` installed, `build/bench/summary.svg`
+plots every run side by side.
