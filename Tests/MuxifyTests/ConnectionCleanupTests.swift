@@ -1,7 +1,9 @@
 import XCTest
 
 final class ConnectionCleanupTests: XCTestCase {
-    @MainActor func testSlowRetirementDoesNotBlockUiAndKeepsCleanupOrder() {
+    private let waitTimeout: TimeInterval = 10
+
+    @MainActor func testSlowRetirementDoesNotBlockUiAndKeepsCleanupOrder() async {
         let cleanup = ConnectionCleanup()
         let release = DispatchSemaphore(value: 0)
         defer { release.signal() }
@@ -13,7 +15,10 @@ final class ConnectionCleanupTests: XCTestCase {
             XCTAssertFalse(Thread.isMainThread)
             phases.append("retire")
             retiring.fulfill()
-            XCTAssertEqual(release.wait(timeout: .now() + 3), .success)
+            // Only the test releases this gate. An independent timeout could
+            // let cleanup finish before a slower CI runner checks its state.
+            // Do not block main forever if retirement regresses onto the UI.
+            if !Thread.isMainThread { release.wait() }
         }, closeSurface: {
             XCTAssertTrue(Thread.isMainThread)
             phases.append("close surface")
@@ -30,14 +35,14 @@ final class ConnectionCleanupTests: XCTestCase {
             finished.fulfill()
         }
         DispatchQueue.main.async { responsive.fulfill() }
-        wait(for: [retiring, responsive], timeout: 2)
+        await fulfillment(of: [retiring, responsive], timeout: waitTimeout)
         XCTAssertEqual(phases.values, ["retire"])
         release.signal()
-        wait(for: [finished], timeout: 2)
+        await fulfillment(of: [finished], timeout: waitTimeout)
         XCTAssertEqual(phases.values, ["retire", "close surface", "remove transport files", "completion", "ready to quit"])
     }
 
-    @MainActor func testQuitWaitsForAnEnvironmentSwitchAlreadyCleaningUp() {
+    @MainActor func testQuitWaitsForAnEnvironmentSwitchAlreadyCleaningUp() async {
         let cleanup = ConnectionCleanup()
         let releaseSwitch = DispatchSemaphore(value: 0)
         defer { releaseSwitch.signal() }
@@ -47,8 +52,9 @@ final class ConnectionCleanupTests: XCTestCase {
         var completions = 0
         var readyToQuit = false
         cleanup.run(retire: {
+            XCTAssertFalse(Thread.isMainThread)
             switching.fulfill()
-            XCTAssertEqual(releaseSwitch.wait(timeout: .now() + 3), .success)
+            if !Thread.isMainThread { releaseSwitch.wait() }
         }, closeSurface: {}, cleanup: {}, completion: { completions += 1 })
         cleanup.run(retire: {}, closeSurface: {}, cleanup: {}, completion: {
             completions += 1
@@ -59,13 +65,13 @@ final class ConnectionCleanupTests: XCTestCase {
             XCTAssertEqual(completions, 2)
             finished.fulfill()
         }
-        wait(for: [switching, currentClosed], timeout: 2)
+        await fulfillment(of: [switching, currentClosed], timeout: waitTimeout)
         XCTAssertFalse(readyToQuit)
         releaseSwitch.signal()
-        wait(for: [finished], timeout: 2)
+        await fulfillment(of: [finished], timeout: waitTimeout)
     }
 
-    @MainActor func testNoPendingCleanupStillCompletesAsynchronouslyOnMain() {
+    @MainActor func testNoPendingCleanupStillCompletesAsynchronouslyOnMain() async {
         let cleanup = ConnectionCleanup()
         var returned = false
         let finished = expectation(description: "idle cleanup completion")
@@ -75,7 +81,7 @@ final class ConnectionCleanupTests: XCTestCase {
             finished.fulfill()
         }
         returned = true
-        wait(for: [finished], timeout: 2)
+        await fulfillment(of: [finished], timeout: waitTimeout)
     }
 
     private final class Phases {
