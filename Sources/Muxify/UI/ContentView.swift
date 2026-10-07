@@ -49,9 +49,11 @@ struct ContentView: View {
         }
         .ignoresSafeArea()
         // Names the window for the Window menu and Mission Control.
-        .navigationTitle(store.selectedWindow?.sessionName ?? "Muxify")
+        .navigationTitle(store.isRemote
+                         ? "\(store.environmentName) — \(store.selectedWindow?.sessionName ?? "Muxify")"
+                         : store.selectedWindow?.sessionName ?? "Muxify")
         .onAppear { store.start() }
-        .onOpenURL { store.handle($0) }
+        .onChange(of: configStore.config.remoteEnvironments) { _, _ in store.reconcileEnvironments() }
     }
 
     private var headerHeight: CGFloat { CGFloat(configStore.config.headerHeight) }
@@ -62,7 +64,7 @@ struct ContentView: View {
 }
 
 /// The fixed strip along the top: room for the traffic lights, the window's
-/// drag handle, and the two panel toggles on the right.
+/// drag handle, Environment selector, and two panel toggles on the right.
 private struct HeaderBar: View {
     let store: WorkspaceStore
     let keybinds: Keybinds
@@ -72,6 +74,9 @@ private struct HeaderBar: View {
         let browserOpen = store.currentBrowser?.isOpen ?? false
         HStack(spacing: 2) {
             Spacer()
+            EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
+                                isConnected: store.isConnected, hasConnectionError: store.terminalMessage != nil,
+                                status: store.environmentStatus, onSelect: store.selectEnvironment)
             TitlebarButton(
                 systemName: "sidebar.left",
                 help: help(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar", .toggleSidebar),
@@ -183,7 +188,14 @@ private struct TerminalArea: View {
                 .font(.system(size: 34, weight: .light))
                 .foregroundStyle(.tertiary)
             if let message = store.terminalMessage {
-                Text(message).foregroundStyle(.secondary)
+                Text(message).foregroundStyle(.secondary).textSelection(.enabled)
+                if store.isRemote {
+                    Text(store.environmentStatus).font(.caption).foregroundStyle(.secondary)
+                    Button("Reconnect") { store.reattach() }
+                }
+            } else if store.isRemote, !store.isConnected {
+                Text(store.environmentStatus).foregroundStyle(.secondary)
+                ProgressView().controlSize(.small)
             } else if store.windows.isEmpty {
                 Text(store.serverRunning ? "No tmux windows" : "tmux server is not running")
                     .foregroundStyle(.secondary)

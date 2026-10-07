@@ -80,15 +80,14 @@ targets:
       - name: Bundle Ghostty resources
         script: "\"$PROJECT_DIR/scripts/bundle-ghostty-resources.sh\""
         basedOnDependencyAnalysis: false
-  # Tests the Config parser and Window navigation, compiled straight into the
-  # test bundle, without launching Muxify (which would attach to tmux).
+  # Compile app code directly into an unhosted test bundle. Native-window tests
+  # do not start Ghostty or attach to the user's tmux.
   MuxifyTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: Sources/Muxify/Config
-        excludes: [ConfigStore.swift]
-      - path: Sources/Muxify/Workspace/WindowNavigation.swift
+      - path: Sources/Muxify
+        excludes: [App/MuxifyApp.swift]
       - path: Tests/MuxifyTests
     dependencies:
       - package: Yams
@@ -97,3 +96,6 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
+        SWIFT_INCLUDE_PATHS: $(PROJECT_DIR)/vendor/ghostty/include
+        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/vendor/ghostty/lib
+        OTHER_LDFLAGS: "-lghostty -lc++ -framework Carbon"

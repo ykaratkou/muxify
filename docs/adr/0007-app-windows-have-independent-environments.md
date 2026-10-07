@@ -1,0 +1,3 @@
+# App Windows have independent Environments
+
+Choosing an Environment opens or focuses its App Window instead of replacing the current connection; New App Window always opens Local and has a configurable shortcut. App Windows share one process and Config but own their terminals, connections and Browser views, with actions routed to the originating or focused window; this keeps Local and remote work visible together without the duplicated runtimes and coordination required by separate processes. Closing retires only that window's connection, and app termination waits asynchronously for all cleanup, including cleanup already in flight, without killing tmux Sessions.

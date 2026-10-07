@@ -38,6 +38,7 @@ struct Agent: Identifiable, Hashable {
     let windowIndex: Int
     /// The Window's `displayTitle`.
     let windowTitle: String
+    var sourceID = ""
 
     var id: String { paneID }
 
@@ -69,7 +70,8 @@ struct Agent: Identifiable, Hashable {
                 sessionID: window.sessionID,
                 sessionName: window.sessionName,
                 windowIndex: window.index,
-                windowTitle: window.displayTitle
+                windowTitle: window.displayTitle,
+                sourceID: window.sourceID
             )
         }
         return agents.filter(\.unread)

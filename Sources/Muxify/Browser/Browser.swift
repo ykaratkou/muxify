@@ -7,6 +7,8 @@ import Observation
 @Observable
 final class Browser {
     let windowID: String
+    /// The local scanner must never use a remote Window ID against local tmux.
+    let discoversLocalServers: Bool
     private(set) var tabs: [BrowserTab] = []
     private(set) var activeTabID: UUID?
     private(set) var isOpen = false
@@ -15,8 +17,9 @@ final class Browser {
 
     @ObservationIgnored var onChange: ((Browser) -> Void)?
 
-    init(windowID: String, stored: StoredBrowser) {
+    init(windowID: String, stored: StoredBrowser, discoversLocalServers: Bool = true) {
         self.windowID = windowID
+        self.discoversLocalServers = discoversLocalServers
         tabs = stored.tabURLs.map { url in
             makeTab(url == "about:blank" ? nil : URL(string: url))
         }

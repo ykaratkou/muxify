@@ -4,6 +4,20 @@ A personal macOS front end for tmux. It has a sidebar of tmux windows, a termina
 
 ## Language
 
+### Environments
+
+**Environment**:
+The context whose Sessions, Windows, Panes and Agents Muxify presents. Local is the Environment on the machine running Muxify.
+_Avoid_: workspace, project
+
+**Remote Environment**:
+An Environment on another machine, presented in the local Muxify app.
+_Avoid_: remote Session, SSH session (when you mean the Environment)
+
+**Active Environment**:
+The Environment shown in an App Window. Each App Window has one Active Environment.
+_Avoid_: current host, active workspace
+
 ### tmux
 
 **Session**:
@@ -47,6 +61,10 @@ The file or plugin folder installed into an Agent's own plugin or hook system th
 _Avoid_: integration, hook (when you mean the whole file), plugin (when you mean ours)
 
 ### Layout
+
+**App Window**:
+A native macOS Muxify window, with its own Active Environment, selected tmux Window, terminal and Browser.
+_Avoid_: instance, Window (without "App", when you mean the native window)
 
 **Sidebar**:
 The panel on the left of the Muxify window that lists Sessions, Windows and Agents.

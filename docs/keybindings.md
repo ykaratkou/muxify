@@ -7,6 +7,7 @@ address bar has focus. All available `keybindings` actions are listed below.
 
 | Action | Default shortcuts | What it does |
 | --- | --- | --- |
+| `new_app_window` | ⌘N | Open a new Local Muxify App Window |
 | `toggle_sidebar` | ⌘S, ⌃⌘S | Show or hide the Sidebar |
 | `toggle_browser` | ⌘B | Show or hide the current Window's Browser |
 | `select_window_1` | ⌘1 | Select the first Window in the current Session |
@@ -21,8 +22,8 @@ address bar has focus. All available `keybindings` actions are listed below.
 | `select_next_window` | Unbound | Select the next Window, wrapping to the first |
 | `select_prev_window` | Unbound | Select the previous Window, wrapping to the last |
 
-All Window navigation stays within the current Session and follows sidebar
-order, not tmux's window indices.
+All tmux Window navigation stays within the focused App Window's current Session
+and follows sidebar order, not tmux's window indices.
 Switching Windows also switches the Browser and focuses the terminal. If a
 numbered position does not exist, the shortcut does nothing.
 
@@ -32,6 +33,7 @@ action, keeps the default bindings, and assigns optional next/previous shortcuts
 
 ```yaml
 keybindings:
+  new_app_window: cmd+n
   toggle_sidebar: [cmd+s, ctrl+cmd+s]
   toggle_browser: cmd+b
   select_window_1: cmd+1
@@ -61,6 +63,10 @@ conflict. Muxify reloads the Config when it changes. Its bindings take precedenc
 over Ghostty and Browser page bindings, but only inside Muxify—not while another
 app is active.
 
+To change New App Window, use `new_app_window: cmd+shift+n`; use
+`new_app_window: []` to disable its shortcuts. This also removes the terminal's
+default ⌘N behavior. New tmux Session remains available from the File menu.
+
 ## Built-in shortcuts
 
 These shortcuts are not configurable as actions in Muxify's `keybindings`
@@ -69,7 +75,6 @@ terminal has focus, Ghostty bindings can take precedence over menu shortcuts.
 
 | Shortcut | Action |
 | --- | --- |
-| ⌘N | Create a new tmux Session |
 | ⌘ + backquote | Focus the terminal |
 | ⌘⇧, | Reload the Muxify Config and Ghostty config |
 

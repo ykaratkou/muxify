@@ -7,7 +7,7 @@ Window its own browser panel for docs and dev servers.
 
 ## How it works
 
-Muxify runs a single `tmux attach` client in a libghostty terminal, so tmux
+Each Muxify App Window runs a `tmux attach` client in a libghostty terminal, so tmux
 draws your Windows and Panes exactly as it does in Ghostty, with your
 `~/.config/ghostty/config`. A tmux control-mode client and a once-a-second poll
 keep the sidebar in sync, and Muxify keeps its own state (Browser Tabs, Agent
@@ -19,9 +19,9 @@ is in [CONTEXT.md](CONTEXT.md), the design decisions in [docs/adr](docs/adr).
 ## Download the beta
 
 Download an Apple-silicon ZIP from [GitHub Releases](https://github.com/ykaratkou/muxify/releases),
-unzip it, and move `Muxify.app` into `/Applications`. Requires macOS 14+ and
-`tmux` (`brew install tmux`). Ghostty and its resources are bundled; Ghostty,
-Zig, and Xcode do not need to be installed to run the beta.
+unzip it, and move `Muxify.app` into `/Applications`. Requires macOS 14+ and,
+for Local, `tmux` (`brew install tmux`). Ghostty is bundled; no Ghostty, Zig or
+Xcode installation is needed to run the beta.
 
 Betas are **ad-hoc signed, not Developer ID signed or notarized**. After trying
 to open the app, macOS may block it. For a download you trust, use **System
@@ -40,6 +40,8 @@ also requires `tmux`.
 ```sh
 make run    # vendors libghostty, generates the Xcode project, builds and opens the app
 ```
+
+For unit tests and an optional live SSH smoke test, see [Testing](docs/testing.md).
 
 `make setup`, which app build targets run first, prepares a fresh machine: it
 installs `xcodegen` with Homebrew if it is missing, then runs
@@ -114,10 +116,41 @@ Then open the installed app and, from the **Muxify** menu:
   the copy you keep.
 - **Install Extensions** installs or updates the status Extension for every
   supported Agent it finds in your home directory: Claude Code, Codex, OpenCode
-  and Pi. Claude Code and Codex need `jq`. For Codex, trust the hooks once with
+  and Pi. The macOS CLI also provides `muxify extensions install`.
+  Claude Code and Codex need `jq`. For Codex, trust the hooks once with
   `/hooks` and launch it with `codex --no-daemon`. Restart running Agents to
   load the Extension. See [extensions/README.md](extensions/README.md) for what
   each one does.
+
+## Remote Environments
+
+Manage tmux on Linux or macOS over SSH. The remote needs **tmux 3.2+**, not
+Muxify. Add destinations to `~/.config/muxify/config.yaml`:
+
+```yaml
+remote_environments:
+  - name: Macbook Home
+    host: macbook-home.example.ts.net
+    username: your-user
+    # port: 22
+    # identity_file: ~/.ssh/id_ed25519
+    # forward_agent: false
+```
+
+Names must be unique; `Local` is reserved. SSH reads `~/.ssh/config`, including
+1Password's `IdentityAgent`. YAML `port` overrides SSH config; `identity_file`
+names a local key. Password authentication is disabled.
+Agent forwarding (`-A`) is on by default; set `forward_agent: false` for hosts
+you don't trust with access to your agent.
+
+Choose an Environment in the header to open its App Window, or focus it if
+already open. ⌘N opens another Local App Window. Closing a window leaves tmux
+running; dropped connections reconnect automatically. Muxify remembers the last
+focused Environment and creates `main` in the remote home if no Session exists.
+
+The Browser stays local: use reachable URLs, such as Tailscale URLs. There is
+no port forwarding or remote dev-server discovery; Reveal in Finder is disabled.
+Install [Agent Extensions](extensions/README.md#install) manually on the remote.
 
 ## Header height
 

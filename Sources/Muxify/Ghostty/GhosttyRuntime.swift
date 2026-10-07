@@ -91,7 +91,7 @@ final class GhosttyRuntime {
             },
             close_surface_cb: { userdata, _ in
                 guard let view = TerminalSurfaceView.from(userdata) else { return }
-                DispatchQueue.main.async { GhosttyRuntime.shared.delegate?.ghosttySurfaceClosed(view) }
+                DispatchQueue.main.async { view.delegate?.ghosttySurfaceClosed(view) }
             }
         )
         app = ghostty_app_new(&runtime, config)
@@ -178,6 +178,9 @@ final class GhosttyRuntime {
         let surfaceView: TerminalSurfaceView? = target.tag == GHOSTTY_TARGET_SURFACE
             ? TerminalSurfaceView.from(ghostty_surface_userdata(target.target.surface))
             : nil
+        // A retired/orphaned surface must never fall back to a different
+        // window's Environment. Only app-targeted actions use focused routing.
+        let actionDelegate = target.tag == GHOSTTY_TARGET_SURFACE ? surfaceView?.delegate : delegate
 
         switch action.tag {
         case GHOSTTY_ACTION_QUIT:
@@ -190,36 +193,36 @@ final class GhosttyRuntime {
             guard let url = URL(string: string) ?? URL(string: string.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? "") else {
                 return false
             }
-            delegate?.ghosttyOpenURL(url)
+            actionDelegate?.ghosttyOpenURL(url)
         case GHOSTTY_ACTION_MOUSE_SHAPE:
             surfaceView?.setCursorShape(action.action.mouse_shape)
         case GHOSTTY_ACTION_MOUSE_VISIBILITY:
             NSCursor.setHiddenUntilMouseMoves(action.action.mouse_visibility == GHOSTTY_MOUSE_HIDDEN)
         case GHOSTTY_ACTION_NEW_TAB:
-            delegate?.ghosttyNewTab()
+            actionDelegate?.ghosttyNewTab()
         case GHOSTTY_ACTION_NEW_WINDOW:
-            delegate?.ghosttyNewWindow()
+            actionDelegate?.ghosttyNewWindow()
         case GHOSTTY_ACTION_NEW_SPLIT:
-            delegate?.ghosttyNewSplit(action.action.new_split)
+            actionDelegate?.ghosttyNewSplit(action.action.new_split)
         case GHOSTTY_ACTION_GOTO_SPLIT:
-            delegate?.ghosttyGotoSplit(action.action.goto_split)
+            actionDelegate?.ghosttyGotoSplit(action.action.goto_split)
         case GHOSTTY_ACTION_TOGGLE_SPLIT_ZOOM:
-            delegate?.ghosttyToggleSplitZoom()
+            actionDelegate?.ghosttyToggleSplitZoom()
         case GHOSTTY_ACTION_EQUALIZE_SPLITS:
-            delegate?.ghosttyEqualizeSplits()
+            actionDelegate?.ghosttyEqualizeSplits()
         case GHOSTTY_ACTION_GOTO_TAB:
-            delegate?.ghosttyGotoTab(action.action.goto_tab.rawValue)
+            actionDelegate?.ghosttyGotoTab(action.action.goto_tab.rawValue)
         case GHOSTTY_ACTION_SHOW_CHILD_EXITED:
             // tmux client exited (detach, server gone): skip libghostty's
             // "press any key" screen and let the app show its own placeholder.
             // Deferred because freeing a surface inside its own callback is unsafe.
             guard let surfaceView else { return false }
-            DispatchQueue.main.async { self.delegate?.ghosttySurfaceClosed(surfaceView) }
+            DispatchQueue.main.async { surfaceView.delegate?.ghosttySurfaceClosed(surfaceView) }
         case GHOSTTY_ACTION_RELOAD_CONFIG:
             if action.action.reload_config.soft {
                 softReload(target: target)
             } else {
-                delegate?.ghosttyReloadConfig()
+                actionDelegate?.ghosttyReloadConfig()
             }
         case GHOSTTY_ACTION_RING_BELL:
             // tmux rings the bell for activity in other Windows (monitor-activity),

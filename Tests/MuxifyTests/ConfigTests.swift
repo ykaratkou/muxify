@@ -20,6 +20,7 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+s")), .toggleSidebar)
             XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s")), .toggleSidebar)
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
+            XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n")), .newAppWindow)
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
             XCTAssertNil(config.ghosttyConfigFile)
@@ -34,6 +35,23 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds, .defaults)
             XCTAssertEqual(config.problems, [])
         }
+    }
+
+    func testNewAppWindowCanBeRemappedDisabledOrHaveItsDefaultClaimed() throws {
+        let remapped = try load("keybindings:\n  new_app_window: [cmd+shift+n, ctrl+cmd+n]")
+        XCTAssertNil(remapped.keybinds.action(for: trigger("cmd+n")))
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("cmd+shift+n")), .newAppWindow)
+        XCTAssertEqual(remapped.keybinds.action(for: trigger("ctrl+cmd+n")), .newAppWindow)
+        XCTAssertTrue(remapped.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        let disabled = try load("keybindings:\n  new_app_window: []")
+        XCTAssertNil(disabled.keybinds.firstTrigger(for: .newAppWindow))
+        XCTAssertTrue(disabled.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        let claimed = try load("keybindings:\n  toggle_browser: cmd+n")
+        XCTAssertEqual(claimed.keybinds.action(for: trigger("cmd+n")), .toggleBrowser)
+        XCTAssertNil(claimed.keybinds.firstTrigger(for: .newAppWindow))
+        XCTAssertFalse(claimed.keybinds.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        XCTAssertFalse(Keybinds.defaults.suppressesDefaultAppWindowShortcut(trigger("cmd+n")))
+        for config in [remapped, disabled, claimed] { XCTAssertTrue(config.problems.isEmpty) }
     }
 
     func testInvalidHeaderHeightUsesTheDefaultAndReportsTheLine() throws {

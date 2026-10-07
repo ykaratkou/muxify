@@ -292,6 +292,7 @@ private struct TabContent: View {
     }
 
     private func scanPorts() {
+        guard browser.discoversLocalServers else { return }
         DevServerScanner.scan(windowID: browser.windowID) { ports = $0 }
     }
 }

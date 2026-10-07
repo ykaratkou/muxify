@@ -4,80 +4,31 @@ import SwiftUI
 @main
 struct MuxifyApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var configStore: ConfigStore
-    @State private var store: WorkspaceStore
+    @State private var windows: AppWindows
 
     init() {
         AppEnvironment.prepare()
         let configStore = ConfigStore()
         configStore.start()
-        _configStore = State(initialValue: configStore)
-        _store = State(initialValue: WorkspaceStore(configStore: configStore))
+        let windows = AppWindows(configStore: configStore)
+        _windows = State(initialValue: windows)
+        GhosttyRuntime.shared.delegate = windows
     }
 
-    private var keybinds: Keybinds { configStore.config.keybinds }
-
     var body: some Scene {
-        Window("Muxify", id: "main") {
-            ContentView(store: store, configStore: configStore)
-                .frame(minWidth: 820, minHeight: 480)
+        WindowGroup("Muxify", id: "workspace", for: AppWindowRequest.self) { request in
+            AppWindowView(request: request.wrappedValue, windows: windows)
+                .onAppear {
+                    appDelegate.shutdown = windows.shutdown
+                    appDelegate.openURLs = { $0.forEach(windows.handle) }
+                }
+        } defaultValue: {
+            windows.initialRequest
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.hiddenTitleBar)
-        .commands {
-            CommandGroup(replacing: .sidebar) {
-                // The key monitor acts on the trigger before the menu sees
-                // it; the shortcut is here to be shown.
-                Button(store.sidebarVisible ? "Hide Sidebar" : "Show Sidebar") { store.toggleSidebar() }
-                    .keyboardShortcut(keybinds.firstTrigger(for: .toggleSidebar)?.shortcut)
-                Toggle("Show Sessions", isOn: $store.sessionsVisible)
-                Toggle("Show Agents", isOn: $store.agentsVisible)
-            }
-            // Browser shortcuts act only when focus is outside the terminal;
-            // in the terminal your Ghostty/tmux bindings handle the keys.
-            CommandGroup(replacing: .newItem) {
-                Button("New Tab") { store.browserCommand { $0.newTab() } }
-                    .keyboardShortcut("t", modifiers: .command)
-                Button("New tmux Window") { store.newWindow() }
-                Button("New tmux Session") { store.newSession() }
-                    .keyboardShortcut("n", modifiers: .command)
-            }
-            CommandMenu("Browser") {
-                Button(store.currentBrowser?.isOpen == true ? "Hide Browser" : "Show Browser") { store.toggleBrowser() }
-                    .keyboardShortcut(keybinds.firstTrigger(for: .toggleBrowser)?.shortcut)
-                Button("Open Location…") { store.browserCommand { _ in store.focusAddressBar() } }
-                    .keyboardShortcut("l", modifiers: .command)
-                Divider()
-                Button("Close Tab") { store.browserCommand { $0.closeActiveTab() } }
-                    .keyboardShortcut("w", modifiers: .command)
-                Button("Show Next Tab") { store.browserCommand { $0.selectTab(offset: 1) } }
-                    .keyboardShortcut("]", modifiers: [.command, .shift])
-                Button("Show Previous Tab") { store.browserCommand { $0.selectTab(offset: -1) } }
-                    .keyboardShortcut("[", modifiers: [.command, .shift])
-                Divider()
-                Button("Back") { store.browserCommand { $0.activeTab?.goBack() } }
-                    .keyboardShortcut("[", modifiers: .command)
-                Button("Forward") { store.browserCommand { $0.activeTab?.goForward() } }
-                    .keyboardShortcut("]", modifiers: .command)
-                Button("Reload Page") { store.browserCommand { $0.activeTab?.reloadOrStop() } }
-                    .keyboardShortcut("r", modifiers: .command)
-                Divider()
-                Button("Focus Terminal") { store.focusTerminal() }
-                    .keyboardShortcut("`", modifiers: .command)
-            }
-            CommandGroup(after: .appSettings) {
-                Button("Open Config") { configStore.openInEditor() }
-                Button("Reload Config") { configStore.reload() }
-                    .keyboardShortcut(",", modifiers: [.command, .shift])
-                Button("Install Extensions") { ExtensionInstaller.run() }
-                Button("Install Command Line Tool") { CommandLineToolInstaller.run() }
-            }
-        }
+        .commands { MuxifyCommands(windows: windows) }
     }
-}
-
-final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
 enum AppEnvironment {

@@ -50,6 +50,21 @@ Codex, and launch Codex with `codex --no-daemon` (see [Codex](#codex)).
 Running it again changes nothing but the Extension files themselves, so it is
 also how you update.
 
+With the existing macOS command line tool installed, the same installer is
+available without launching the app:
+
+```sh
+muxify extensions install
+```
+
+It resolves the command's app-bundle symlink and uses the bundled reporter
+files. Run it on the Mac whose Agent configuration you want to update. Remote
+installation is manual; selecting a Remote Environment never provisions it,
+and the app's Install Extensions action is disabled while a remote is selected.
+No Linux CLI package is provided. The existing `install.sh` and its adjacent
+reporter folders can still be used directly on a remote host from a copy of
+this folder. Reporters talk to tmux, not to the Muxify CLI or GUI.
+
 For Claude Code (detected by `~/.claude`), the installer:
 
 - copies `claude/muxify-status.sh` to `~/.claude/hooks/muxify-status.sh`

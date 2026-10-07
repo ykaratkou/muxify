@@ -152,7 +152,7 @@ private struct SessionsSection: View {
     @ViewBuilder
     private func menu(for window: TmuxWindow) -> some View {
         Button("Rename Window…") { rename(window) }
-        Button("New Window in \(window.sessionName)") { store.newWindow(inSession: window.sessionID) }
+        Button("New Window in \(window.sessionName)") { store.newWindow(beside: window) }
         Divider()
         Button("Copy Path") {
             NSPasteboard.general.clearContents()
@@ -161,6 +161,7 @@ private struct SessionsSection: View {
         Button("Reveal in Finder") {
             NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: window.path)
         }
+        .disabled(store.isRemote)
         Divider()
         Button("Kill Window…", role: .destructive) { confirmKill(window) }
     }

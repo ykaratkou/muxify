@@ -24,6 +24,8 @@ struct Config: Equatable {
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     var ghosttyConfigFile: String?
+    /// In file order; Local is always available and is never declared here.
+    var remoteEnvironments: [RemoteEnvironment] = []
     var problems: [ConfigProblem] = []
 
     static var defaultPath: String {
@@ -67,6 +69,14 @@ struct Config: Equatable {
         # ui:
         #   # Header height in points (minimum 24). Changes apply live.
         #   header_height: 30
+        #
+        # remote_environments:
+        #   - name: Macbook Home
+        #     host: macbook-home.example.ts.net
+        #     username: your-user
+        #     # port: 22
+        #     # identity_file: ~/.ssh/id_ed25519
+        #     # forward_agent: false  # Agent forwarding is enabled by default.
         #
         # keybindings:
         #   # An action maps to one trigger or a list of them, spelled as in
@@ -128,6 +138,7 @@ private struct ConfigReader {
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
         "keybindings": { $0.readKeybindings($1) },
+        "remote_environments": { $0.readRemoteEnvironments($1) },
     ]
 
     mutating func readSections(_ root: Node) {
@@ -155,6 +166,80 @@ private struct ConfigReader {
             default:
                 problem(at: key, "unknown key \"ghostty.\(name)\"")
             }
+        }
+    }
+
+    mutating func readRemoteEnvironments(_ node: Node) {
+        guard let sequence = node.sequence else {
+            problem(at: node, "remote_environments: expected a list")
+            return
+        }
+        var names: Set<String> = ["Local"]
+        for item in sequence {
+            let problemCount = config.problems.count
+            let fields = entries(of: item, "a Remote Environment")
+            var values: [String: Node] = [:]
+            for (name, key, value) in fields {
+                guard ["name", "host", "username", "port", "identity_file", "forward_agent"].contains(name) else {
+                    problem(at: key, "unknown Remote Environment key \"\(name)\"")
+                    continue
+                }
+                values[name] = value
+            }
+            func required(_ key: String) -> String? {
+                values[key].flatMap(string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let name = required("name")
+            let host = required("host")
+            let username = required("username")
+            for (key, value) in [("name", name), ("host", host), ("username", username)] {
+                if value?.isEmpty != false {
+                    problem(at: values[key] ?? item, "Remote Environment \(key): expected a nonempty string")
+                }
+            }
+            if let name, name.rangeOfCharacter(from: .controlCharacters) != nil {
+                problem(at: values["name"] ?? item, "Remote Environment name: control characters are not allowed")
+            }
+            for (key, value) in [("host", host), ("username", username)] {
+                if let value, !value.isEmpty,
+                   value.hasPrefix("-") || value.rangeOfCharacter(from: .whitespacesAndNewlines.union(.controlCharacters)) != nil {
+                    problem(at: values[key] ?? item, "Remote Environment \(key): expected a host or username without whitespace or a leading '-'")
+                }
+            }
+            var port: Int?
+            if let value = values["port"], value.null == nil {
+                if let number = value.int, (1...65535).contains(number) {
+                    port = number
+                } else {
+                    problem(at: value, "Remote Environment port: expected an integer from 1 to 65535")
+                }
+            }
+            var identityFile: String?
+            if let value = values["identity_file"], value.null == nil {
+                if let path = string(value), !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   path.rangeOfCharacter(from: .controlCharacters) == nil {
+                    identityFile = ConfigFileSet.resolve(path, relativeTo: (self.path as NSString).deletingLastPathComponent)
+                } else {
+                    problem(at: value, "Remote Environment identity_file: expected a local path")
+                }
+            }
+            var forwardAgent = true
+            if let value = values["forward_agent"], value.null == nil {
+                if let enabled = value.bool {
+                    forwardAgent = enabled
+                } else {
+                    problem(at: value, "Remote Environment forward_agent: expected true or false")
+                }
+            }
+            if let name, names.contains(name) {
+                problem(at: values["name"] ?? item, "Remote Environment name \"\(name)\" is already used (Local is reserved)")
+            }
+            guard config.problems.count == problemCount, let name, let host, let username else { continue }
+            names.insert(name)
+            config.remoteEnvironments.append(RemoteEnvironment(
+                name: name, host: host, username: username, port: port, identityFile: identityFile,
+                forwardAgent: forwardAgent
+            ))
         }
     }
 

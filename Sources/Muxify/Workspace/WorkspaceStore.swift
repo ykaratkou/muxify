@@ -26,6 +26,12 @@ final class WorkspaceStore {
     }
     private(set) var surface: TerminalSurfaceView?
     private(set) var terminalMessage: String?
+    private(set) var activeEnvironment: RemoteEnvironment?
+    private(set) var environmentStatus = "Local"
+    private(set) var isConnected = false
+    var remoteEnvironments: [RemoteEnvironment] { configStore.config.remoteEnvironments }
+    var isRemote: Bool { activeEnvironment != nil }
+    var environmentName: String { activeEnvironment?.name ?? "Local" }
     /// The Ghostty theme's colors; the header and sidebar follow them.
     private(set) var theme: TerminalTheme?
 
@@ -62,6 +68,10 @@ final class WorkspaceStore {
     @ObservationIgnored private let events = TmuxEvents()
     @ObservationIgnored private var browsers: [String: Browser] = [:]
     @ObservationIgnored private var persistWork: [String: DispatchWorkItem] = [:]
+    /// Keep changes dirty until tmux confirms the write, including commands
+    /// already submitted when a window closes. Never flush unchanged Browsers
+    /// over newer state saved by another App Window.
+    @ObservationIgnored private var dirtyBrowsers: [String: UUID] = [:]
     /// Windows whose `@muxify_open` we consumed and are clearing.
     @ObservationIgnored private var consumingOpen = Set<String>()
     @ObservationIgnored private var rememberedWindowID: String?
@@ -80,9 +90,22 @@ final class WorkspaceStore {
     @ObservationIgnored private var agentStatuses: [String: String] = [:]
     @ObservationIgnored private var activationObserver: Any?
     @ObservationIgnored private var started = false
+    @ObservationIgnored private var connection: TmuxConnection?
+    @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var isTransitioning = false
+    @ObservationIgnored private var reconnectWork: DispatchWorkItem?
+    @ObservationIgnored private var reconnectAttempt = 0
+    @ObservationIgnored private var serverID: String?
+    @ObservationIgnored private var homeDirectory = NSHomeDirectory()
+    @ObservationIgnored private var isShuttingDown = false
+    @ObservationIgnored private let connectionCleanup = ConnectionCleanup()
+    @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
+    @ObservationIgnored var onNewAppWindow: (() -> Void)?
+    @ObservationIgnored var shouldConsumeOpenRequests: (() -> Bool)?
 
-    init(configStore: ConfigStore) {
+    init(configStore: ConfigStore, environment: RemoteEnvironment? = nil) {
         self.configStore = configStore
+        activeEnvironment = environment
         // Browser state used to be kept here, keyed by window id; it now lives
         // on the tmux Windows (ADR 0003).
         UserDefaults.standard.removeObject(forKey: "browserURLs")
@@ -92,16 +115,11 @@ final class WorkspaceStore {
     }
 
     func start() {
-        guard !started else { return }
+        guard !started, !isShuttingDown else { return }
         started = true
-        GhosttyRuntime.shared.delegate = self
         theme = GhosttyRuntime.shared.theme
         guard GhosttyRuntime.shared.app != nil else {
             terminalMessage = "libghostty failed to initialize."
-            return
-        }
-        guard Tmux.binary != nil else {
-            terminalMessage = "tmux was not found. Install it with `brew install tmux`."
             return
         }
         installKeyMonitor()
@@ -109,27 +127,183 @@ final class WorkspaceStore {
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in self?.refresh() }
-        events.onEvent = { [weak self] in self?.handle($0) }
-        refresh(attachIfNeeded: true)
+        startConnection()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.refresh()
+        }
+    }
+
+    // MARK: - Environments
+
+    func selectEnvironment(named name: String?) {
+        guard !isShuttingDown else { return }
+        onSelectEnvironment?(name)
+    }
+
+    func reconcileEnvironments() {
+        guard let activeEnvironment else { return }
+        let next = remoteEnvironments.first { $0.name == activeEnvironment.name }
+        if next != activeEnvironment { transition(to: next) }
+    }
+
+    /// Reconnect after transport/config changes. Environment clicks instead
+    /// open or focus another App Window through the app coordinator.
+    private func transition(to next: RemoteEnvironment?) {
+        guard !isShuttingDown else { return }
+        activeEnvironment = next
+        generation = UUID()
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        isConnected = false
+        environmentStatus = next == nil ? "Switching to Local" : "Connecting to \(next!.name)…"
+        terminalMessage = nil
+        guard !isTransitioning else { return }
+        isTransitioning = true
+        let oldConnection = connection
+        let oldSurface = surface
+        let flush = pendingBrowserCommands
+        events.stop()
+        surface = nil
+        terminalHost.show(nil)
+        clearServerState()
+        connection = nil
+        connectionCleanup.run(retire: { oldConnection?.retire(flushing: flush) },
+                              closeSurface: { oldSurface?.close() },
+                              cleanup: { oldConnection?.cleanup() }) { [weak self] in
+            guard let self else { return }
+            self.isTransitioning = false
+            guard self.started, !self.isShuttingDown else { return }
+            self.startConnection()
+        }
+    }
+
+    private func startConnection() {
+        guard !isTransitioning else { return }
+        if !isRemote, Tmux.binary == nil {
+            terminalMessage = "tmux was not found. Install it with `brew install tmux`."
+            environmentStatus = "Local tmux was not found"
+            return
+        }
+        do { connection = try TmuxConnection(environment: activeEnvironment) }
+        catch {
+            terminalMessage = String(describing: error)
+            environmentStatus = "Could not start \(environmentName)"
+            return
+        }
+        let current = generation
+        events.onEvent = { [weak self] event in
+            guard let self, self.generation == current else { return }
+            self.handle(event)
+        }
+        if isRemote {
+            environmentStatus = "Connecting to \(environmentName)…"
+            attach(to: nil)
+        } else {
+            environmentStatus = "Local"
+            isConnected = true
+            refresh(attachIfNeeded: true)
+        }
+    }
+
+    private func clearServerState() {
+        persistWork.values.forEach { $0.cancel() }
+        persistWork.removeAll()
+        dirtyBrowsers.removeAll()
+        browsers.values.forEach { $0.tearDown() }
+        browsers.removeAll()
+        consumingOpen.removeAll()
+        agentStatuses.removeAll()
+        windows = []
+        agents = []
+        selectedWindowID = nil
+        rememberedWindowID = nil
+        clientTTY = nil
+        serverID = nil
+        pendingSelection = nil
+        pendingSession = nil
+        isRefreshing = false
+        refreshAgain = false
+        serverRunning = false
+        homeDirectory = NSHomeDirectory()
+    }
+
+    /// Called before AppKit commits to quitting. Snapshot UI-owned Browser
+    /// state here, then wait asynchronously for every owned transport to close.
+    func shutdown(completion: @escaping () -> Void) {
+        guard !isShuttingDown else { connectionCleanup.whenFinished(completion); return }
+        isShuttingDown = true
+        started = false
+        generation = UUID()
+        timer?.invalidate()
+        timer = nil
+        reconnectWork?.cancel()
+        reconnectWork = nil
+        persistWork.values.forEach { $0.cancel() }
+        persistWork.removeAll()
+        events.stop()
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
+        activationObserver = nil
+        let oldConnection = connection
+        let oldSurface = surface
+        let flush = pendingBrowserCommands
+        browsers.values.forEach { $0.tearDown() }
+        browsers.removeAll()
+        dirtyBrowsers.removeAll()
+        connection = nil
+        surface = nil
+        terminalHost.show(nil)
+        connectionCleanup.run(retire: { oldConnection?.retire(flushing: flush) },
+                              closeSurface: { oldSurface?.close() },
+                              cleanup: { oldConnection?.cleanup() })
+        connectionCleanup.whenFinished(completion)
+    }
+
+    /// Every completion belongs to the connection that submitted it, never to
+    /// whatever Environment happens to be selected when it finishes.
+    private func runAsync(_ args: [String], completion: ((Result<String, Error>) -> Void)? = nil) {
+        guard let connection, !isTransitioning, !isRemote || isConnected else { return }
+        let current = generation
+        connection.runAsync(args) { [weak self] result in
+            guard let self, self.generation == current else { return }
+            if case .failure(let error) = result { NSLog("muxify: tmux command failed: \(error)") }
+            completion?(result)
         }
     }
 
     // MARK: - Polling
 
     func refresh(attachIfNeeded: Bool = false) {
+        guard let connection, !isTransitioning else { return }
         guard !isRefreshing else {
             refreshAgain = true
             return
         }
         isRefreshing = true
+        let current = generation
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let snapshot = Tmux.snapshot()
+            let result = Result { try connection.snapshot() }
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self, self.generation == current else { return }
                 self.isRefreshing = false
-                self.apply(snapshot, attachIfNeeded: attachIfNeeded)
+                switch result {
+                case .success(let snapshot):
+                    if self.isRemote {
+                        self.clientTTY = snapshot.ownClientTTY
+                        self.homeDirectory = snapshot.homeDirectory ?? self.homeDirectory
+                        self.isConnected = true
+                        self.environmentStatus = "Connected to \(self.environmentName)"
+                        self.reconnectAttempt = 0
+                        self.terminalMessage = nil
+                    }
+                    self.apply(snapshot, attachIfNeeded: attachIfNeeded)
+                case .failure(let error):
+                    self.isConnected = false
+                    if error as? TmuxError != .notReady {
+                        self.environmentStatus = "Waiting for \(self.environmentName): \(error)"
+                    }
+                }
                 if self.refreshAgain {
                     self.refreshAgain = false
                     self.refresh()
@@ -150,6 +324,12 @@ final class WorkspaceStore {
     }
 
     private func apply(_ snapshot: TmuxSnapshot, attachIfNeeded: Bool) {
+        if let serverID, let next = snapshot.serverID, serverID != next {
+            clearServerState()
+            clientTTY = snapshot.ownClientTTY
+            homeDirectory = snapshot.homeDirectory ?? NSHomeDirectory()
+        }
+        serverID = snapshot.serverID
         if windows != snapshot.windows { windows = snapshot.windows }
         let agents = snapshot.agents
         if self.agents != agents { self.agents = agents }
@@ -170,7 +350,7 @@ final class WorkspaceStore {
         // (Re)start listening once there is a Session to attach to.
         if snapshot.serverRunning, !events.isRunning,
            let sessionID = selectedWindow?.sessionID ?? windows.first?.sessionID {
-            events.start(sessionID: sessionID)
+            if let connection { events.start(sessionID: sessionID, connection: connection) }
         }
 
         if snapshot.serverRunning {
@@ -178,13 +358,15 @@ final class WorkspaceStore {
             for (id, browser) in browsers where !live.contains(id) {
                 browser.tearDown()
                 browsers[id] = nil
+                dirtyBrowsers[id] = nil
+                persistWork.removeValue(forKey: id)?.cancel()
             }
         }
     }
 
     /// The sidebar follows whatever window our tmux client is showing.
     private func followClient(_ clients: [TmuxClient]) {
-        if clientTTY == nil { clientTTY = surface?.ttyName }
+        if clientTTY == nil, !isRemote { clientTTY = surface?.ttyName }
         if let tty = clientTTY, let client = clients.first(where: { $0.tty == tty }) {
             if let pending = pendingSelection, client.windowID == pending.windowID || Date() > pending.deadline {
                 pendingSelection = nil
@@ -207,7 +389,7 @@ final class WorkspaceStore {
     private func rememberSelection() {
         guard let selectedWindowID, selectedWindowID != rememberedWindowID else { return }
         rememberedWindowID = selectedWindowID
-        Tmux.runAsync(["set-option", "-gq", Tmux.lastWindowOption, selectedWindowID])
+        runAsync(["set-option", "-gq", Tmux.lastWindowOption, selectedWindowID])
     }
 
     // MARK: - Terminal
@@ -234,8 +416,8 @@ final class WorkspaceStore {
     private func attach(to target: Target?) {
         let args = target.map { ["-u", "attach-session", "-t", $0.tmuxTarget] }
             ?? ["-u", "new-session", "-A", "-s", "main", "-c", NSHomeDirectory()]
-        guard let command = Tmux.commandLine(args),
-              let view = TerminalSurfaceView(command: command, workingDirectory: target?.path)
+        guard let connection, let command = try? connection.terminalCommand(args, target: target?.tmuxTarget),
+              let view = TerminalSurfaceView(command: command, workingDirectory: isRemote ? nil : target?.path, delegate: self)
         else {
             terminalMessage = "Could not start the terminal."
             return
@@ -248,14 +430,20 @@ final class WorkspaceStore {
         if let target { pendingSelection = (target.windowID, Date().addingTimeInterval(3)) }
         terminalHost.show(view)
         focusTerminal()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.refresh() }
+        let current = generation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+            guard let self, self.generation == current else { return }
+            self.refresh()
+        }
     }
 
     func reattach() {
+        if isRemote { reconnectAttempt = 0; transition(to: activeEnvironment); return }
         attach(to: (selectedWindow ?? Self.initialWindow(in: windows)).map(Target.init))
     }
 
     func select(_ window: TmuxWindow) {
+        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else { return }
         switchClient(to: Target(window))
     }
 
@@ -292,7 +480,8 @@ final class WorkspaceStore {
     /// selected first (tmux commands run in order) so the Window shows up
     /// with the Agent already focused.
     func select(_ agent: Agent) {
-        Tmux.runAsync(["select-pane", "-t", agent.paneID])
+        guard agents.contains(where: { $0.id == agent.id && $0.sourceID == agent.sourceID }) else { return }
+        runAsync(["select-pane", "-t", agent.paneID])
         if let window = windows.first(where: { $0.id == agent.windowID }) {
             select(window)
         } else {
@@ -305,7 +494,7 @@ final class WorkspaceStore {
     /// read again once you are. The flag is a Pane option, so it outlives a
     /// relaunch; it goes when the Agent does.
     private func updateUnread(_ panes: [TmuxPane]) {
-        let lookingAt = NSApp.isActive ? selectedWindowID : nil
+        let lookingAt = NSApp.isActive && terminalHost.window?.isKeyWindow == true ? selectedWindowID : nil
         var commands: [[String]] = []
         for pane in panes {
             let previous = agentStatuses[pane.id]
@@ -323,19 +512,21 @@ final class WorkspaceStore {
         let live = Set(panes.map(\.id))
         agentStatuses = agentStatuses.filter { live.contains($0.key) }
         guard !commands.isEmpty else { return }
-        Tmux.runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in self?.refresh() }
+        runAsync(Array(commands.joined(separator: [";"]))) { [weak self] _ in self?.refresh() }
     }
 
     private func switchClient(to target: Target) {
+        guard !isTransitioning, !isRemote || isConnected else { return }
         selectedWindowID = target.windowID
-        pendingSelection = (target.windowID, Date().addingTimeInterval(2))
+        pendingSelection = (target.windowID, Date().addingTimeInterval(isRemote ? 10 : 2))
         focusTerminal()
-        guard let surface, !surface.processExited, let tty = clientTTY ?? surface.ttyName else {
+        guard let surface, !surface.processExited, let tty = clientTTY ?? (isRemote ? nil : surface.ttyName) else {
+            if isRemote { return }
             attach(to: target)
             return
         }
         clientTTY = tty
-        Tmux.runAsync(["switch-client", "-c", tty, "-t", target.tmuxTarget]) { [weak self] _ in self?.refresh() }
+        runAsync(["switch-client", "-c", tty, "-t", target.tmuxTarget]) { [weak self] _ in self?.refresh() }
     }
 
     var isTerminalFocused: Bool {
@@ -357,6 +548,11 @@ final class WorkspaceStore {
 
     // MARK: - tmux commands
 
+    func newWindow(beside window: TmuxWindow) {
+        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else { return }
+        newWindow(inSession: window.sessionID)
+    }
+
     func newWindow(inSession sessionID: String? = nil) {
         guard let sessionID = sessionID ?? selectedWindow?.sessionID ?? windows.first?.sessionID,
               let sibling = selectedWindow?.sessionID == sessionID ? selectedWindow : windows.first(where: { $0.sessionID == sessionID })
@@ -366,7 +562,7 @@ final class WorkspaceStore {
         }
         // -d, then switch only our client: other Sessions' current windows stay put.
         let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", sibling.path]
-        Tmux.runAsync(args) { [weak self] result in
+        runAsync(args) { [weak self] result in
             guard let self, case .success(let output) = result else { return }
             let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
             self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: sibling.path))
@@ -374,11 +570,11 @@ final class WorkspaceStore {
     }
 
     func newSession() {
-        let cwd = selectedWindow?.path ?? NSHomeDirectory()
+        let cwd = selectedWindow?.path ?? homeDirectory
         var args = ["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-c", cwd]
         let name = (cwd as NSString).lastPathComponent.replacingOccurrences(of: ".", with: "_")
         if !name.isEmpty, !windows.contains(where: { $0.sessionName == name }) { args += ["-s", name] }
-        Tmux.runAsync(args) { [weak self] result in
+        runAsync(args) { [weak self] result in
             guard let self, case .success(let output) = result else { return }
             let ids = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map(String.init)
             guard ids.count == 2 else { return }
@@ -387,21 +583,26 @@ final class WorkspaceStore {
     }
 
     func killWindow(_ window: TmuxWindow) {
-        Tmux.runAsync(["kill-window", "-t", window.id]) { [weak self] _ in self?.refresh() }
+        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else { return }
+        runAsync(["kill-window", "-t", window.id]) { [weak self] _ in self?.refresh() }
     }
 
     func renameWindow(_ window: TmuxWindow, to name: String) {
-        Tmux.runAsync(["rename-window", "-t", window.id, name]) { [weak self] _ in self?.refresh() }
+        guard windows.contains(where: { $0.id == window.id && $0.sourceID == window.sourceID }) else { return }
+        runAsync(["rename-window", "-t", window.id, name]) { [weak self] _ in self?.refresh() }
     }
 
     /// Runs a tmux command against the pane our client currently has focused.
     private func runOnCurrentPane(_ makeArgs: @escaping (_ paneID: String, _ windowID: String) -> [String]) {
-        guard let tty = clientTTY else { return }
-        Tmux.runAsync(["display-message", "-p", "-c", tty, "#{pane_id} #{window_id}"]) { [weak self] result in
+        // display-message's -c is a message recipient, not a dependable format
+        // context. Another client (including the event listener) may otherwise
+        // supply its current Pane. Window selection is queued before this call.
+        guard let windowID = selectedWindowID else { return }
+        runAsync(["display-message", "-p", "-t", windowID, "#{pane_id} #{window_id}"]) { [weak self] result in
             guard case .success(let output) = result else { return }
             let ids = output.split(separator: " ").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             guard ids.count == 2 else { return }
-            Tmux.runAsync(makeArgs(ids[0], ids[1])) { _ in self?.refresh() }
+            self?.runAsync(makeArgs(ids[0], ids[1])) { _ in self?.refresh() }
         }
     }
 
@@ -411,8 +612,12 @@ final class WorkspaceStore {
     func browser(for windowID: String) -> Browser {
         if let browser = browsers[windowID] { return browser }
         let stored = windows.first { $0.id == windowID }?.storedBrowser ?? StoredBrowser()
-        let browser = Browser(windowID: windowID, stored: stored)
-        browser.onChange = { [weak self] in self?.persist($0) }
+        let browser = Browser(windowID: windowID, stored: stored, discoversLocalServers: !isRemote)
+        let current = generation
+        browser.onChange = { [weak self] browser in
+            guard let self, self.generation == current else { return }
+            self.persist(browser)
+        }
         browsers[windowID] = browser
         return browser
     }
@@ -470,12 +675,15 @@ final class WorkspaceStore {
     /// `tmux set -w -t "$TMUX_PANE" @muxify_open <url>` (several URLs may be
     /// space-separated); we open them and clear the option.
     private func consumeOpenRequests() {
+        // Several Local App Windows can see the same tmux option. Only one
+        // should consume it, not open duplicate Tabs in every Browser view.
+        guard shouldConsumeOpenRequests?() ?? true else { return }
         for window in windows where !window.openRequests.isEmpty && !consumingOpen.contains(window.id) {
             consumingOpen.insert(window.id)
             for request in window.openRequests {
                 if let url = Omnibox.url(for: request) { openInBrowser(url, windowID: window.id) }
             }
-            Tmux.runAsync(["set-option", "-wqu", "-t", window.id, Tmux.openOption]) { [weak self] _ in
+            runAsync(["set-option", "-wqu", "-t", window.id, Tmux.openOption]) { [weak self] _ in
                 self?.consumingOpen.remove(window.id)
             }
         }
@@ -484,21 +692,33 @@ final class WorkspaceStore {
     /// Writes a Browser back onto its tmux Window, coalescing bursts of
     /// changes (redirects, quick Tab switching) into one tmux call.
     private func persist(_ browser: Browser) {
+        guard !isShuttingDown else { return }
         let id = browser.windowID
+        let current = generation
+        let revision = UUID()
+        dirtyBrowsers[id] = revision
         persistWork[id]?.cancel()
         let work = DispatchWorkItem { [weak self, weak browser] in
-            self?.persistWork[id] = nil
-            guard let browser else { return }
-            Tmux.runAsync(browser.stored.setOptionArgs(windowID: id))
+            guard let self, self.generation == current, let browser else { return }
+            self.persistWork[id] = nil
+            self.runAsync(browser.stored.setOptionArgs(windowID: id)) { [weak self] result in
+                guard let self, case .success = result, self.dirtyBrowsers[id] == revision else { return }
+                self.dirtyBrowsers[id] = nil
+            }
         }
         persistWork[id] = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    var pendingBrowserCommands: [[String]] {
+        dirtyBrowsers.keys.sorted().compactMap { id in browsers[id]?.stored.setOptionArgs(windowID: id) }
     }
 
     // MARK: - Keyboard
 
     private func perform(_ action: ConfigAction) {
         switch action {
+        case .newAppWindow: onNewAppWindow?()
         case .toggleSidebar: toggleSidebar()
         case .toggleBrowser: toggleBrowser()
         case .selectWindow1: navigateWindows(.position(1))
@@ -522,24 +742,32 @@ final class WorkspaceStore {
     /// Other keys in the terminal are left to Ghostty/tmux bindings.
     private func installKeyMonitor() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.window === self.terminalHost.window else { return event }
-            if let trigger = KeyTrigger(event), let action = self.configStore.config.keybinds.action(for: trigger) {
-                self.perform(action)
-                return nil
-            }
-            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            let key = event.charactersIgnoringModifiers?.lowercased()
-
-            if flags == .command, key == "w" {
-                if self.isBrowserFocused { self.browserCommand { $0.closeActiveTab() } }
-                return nil
-            }
-            if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], self.isBrowserFocused {
-                self.currentBrowser?.selectTab(offset: flags.contains(.shift) ? -1 : 1)
-                return nil
-            }
-            return event
+            guard let self else { return event }
+            return self.handleKeyEvent(event)
         }
+    }
+
+    func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
+        guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
+        if let trigger = KeyTrigger(event) {
+            let keybinds = configStore.config.keybinds
+            if let action = keybinds.action(for: trigger) {
+                perform(action)
+                return nil
+            }
+            if keybinds.suppressesDefaultAppWindowShortcut(trigger) { return nil }
+        }
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if flags == .command, key == "w" {
+            if isBrowserFocused { browserCommand { $0.closeActiveTab() } }
+            return nil
+        }
+        if event.keyCode == 0x30, flags == .control || flags == [.control, .shift], isBrowserFocused {
+            currentBrowser?.selectTab(offset: flags.contains(.shift) ? -1 : 1)
+            return nil
+        }
+        return event
     }
 }
 
@@ -594,7 +822,7 @@ extension WorkspaceStore: GhosttyRuntimeDelegate {
     }
 
     func ghosttyNewTab() { newWindow() }
-    func ghosttyNewWindow() { newSession() }
+    func ghosttyNewWindow() { onNewAppWindow?() }
 
     func ghosttyNewSplit(_ direction: ghostty_action_split_direction_e) {
         let flags: [String]
@@ -646,6 +874,31 @@ extension WorkspaceStore: GhosttyRuntimeDelegate {
         surface = nil
         clientTTY = nil
         terminalHost.show(nil)
+        if let remote = connection?.remote {
+            events.stop()
+            isConnected = false
+            let message = remote.failureMessage
+            if remote.exitStatus == 0 {
+                environmentStatus = "Detached from \(environmentName)"
+                terminalMessage = "Detached from remote tmux."
+            } else {
+                environmentStatus = "Disconnected from \(environmentName)"
+                terminalMessage = message.isEmpty ? "SSH connection closed." : message
+            }
+            if remote.shouldReconnect {
+                let delay = min(pow(2, Double(min(reconnectAttempt, 5))), 30)
+                reconnectAttempt += 1
+                environmentStatus += ". Reconnecting in \(Int(delay))s…"
+                let current = generation
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, self.generation == current else { return }
+                    self.transition(to: self.activeEnvironment)
+                }
+                reconnectWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+            }
+            return
+        }
         refresh()
     }
 }

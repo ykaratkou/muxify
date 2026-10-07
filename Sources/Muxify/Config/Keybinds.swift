@@ -1,5 +1,6 @@
 /// What a Muxify keybind can do.
 enum ConfigAction: String, CaseIterable {
+    case newAppWindow = "new_app_window"
     case toggleSidebar = "toggle_sidebar"
     case toggleBrowser = "toggle_browser"
     case selectWindow1 = "select_window_1"
@@ -22,6 +23,7 @@ struct Keybinds: Equatable {
 
     /// The defaults as the user spells them, so the template can show them.
     static let defaultSpelling: KeyValuePairs<ConfigAction, [String]> = [
+        .newAppWindow: ["cmd+n"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
         .toggleBrowser: ["cmd+b"],
         .selectWindow1: ["cmd+1"],
@@ -48,5 +50,11 @@ struct Keybinds: Equatable {
     /// The trigger menus and tooltips show for `action`.
     func firstTrigger(for action: ConfigAction) -> KeyTrigger? {
         triggers[action]?.first
+    }
+
+    /// Remapping/disabling New App Window must also remove Ghostty's fallback
+    /// Cmd+N behavior, rather than leaving a second shortcut in the terminal.
+    func suppressesDefaultAppWindowShortcut(_ trigger: KeyTrigger) -> Bool {
+        trigger == Self.defaults.firstTrigger(for: .newAppWindow) && action(for: trigger) == nil
     }
 }

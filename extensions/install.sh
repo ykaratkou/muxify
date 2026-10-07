@@ -1,7 +1,7 @@
 #!/bin/sh
 # Installs or updates the Muxify Extension of every Agent set up under $HOME.
 #
-# Muxify ▸ Install Extensions runs the copy of this script bundled inside the
+# Muxify ▸ Install Extensions and `muxify extensions install` run this script inside the
 # app; the Extension files are found next to it, so the bundled installer
 # installs the bundled Extensions. An Agent counts as set up when its config
 # directory exists (a Finder-launched app can't rely on PATH to find the

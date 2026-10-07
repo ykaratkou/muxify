@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Hears about tmux changes as they happen through a control-mode client
 /// (`tmux -C`), so the sidebar doesn't wait for the next poll when a Window is
@@ -17,18 +18,21 @@ final class TmuxEvents {
 
     private var process: Process?
     private var input: Pipe?
-    /// Output not yet split into lines; only touched by the read handler.
-    private var buffer = Data()
+    private var output: Pipe?
+    private var nextStart = Date.distantPast
 
     var isRunning: Bool { process?.isRunning == true }
 
     /// Attaches to `sessionID`. Notifications cover every Session, so which
     /// one doesn't matter.
-    func start(sessionID: String) {
-        guard !isRunning, let binary = Tmux.binary else { return }
+    func start(sessionID: String, connection: TmuxConnection) {
+        guard !isRunning, Date() >= nextStart,
+              let invocation = try? connection.invocation(["-C", "attach-session", "-f", "read-only,no-output,ignore-size", "-t", sessionID])
+        else { return }
+        stop()
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: binary)
-        process.arguments = ["-C", "attach-session", "-f", "read-only,no-output,ignore-size", "-t", sessionID]
+        process.executableURL = URL(fileURLWithPath: invocation.executable)
+        process.arguments = invocation.arguments
         // Control mode exits when its input closes, so holding the pipe keeps
         // it running, and it goes away with us even if we crash.
         let input = Pipe()
@@ -36,36 +40,67 @@ final class TmuxEvents {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
-        buffer.removeAll()
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        let buffer = EventBuffer()
+        output.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
             let data = handle.availableData
             guard !data.isEmpty else {
                 handle.readabilityHandler = nil
                 return
             }
-            self?.received(data)
+            let events = buffer.receive(data)
+            DispatchQueue.main.async {
+                guard let self, let process, self.process === process else { return }
+                events.forEach { self.onEvent?($0) }
+            }
         }
+        process.terminationHandler = { [weak self, weak process] _ in
+            DispatchQueue.main.async {
+                guard let self, let process, self.process === process else { return }
+                self.stop()
+                self.nextStart = Date().addingTimeInterval(2)
+            }
+        }
+        self.process = process
+        self.input = input
+        self.output = output
         do {
             try process.run()
         } catch {
             NSLog("muxify: tmux control client failed to start: \(error)")
+            stop()
             return
         }
-        self.process = process
-        self.input = input
     }
 
-    private func received(_ data: Data) {
-        buffer.append(data)
-        var events: [Event] = []
-        while let newline = buffer.firstIndex(of: UInt8(ascii: "\n")) {
-            let line = String(decoding: buffer[buffer.startIndex..<newline], as: UTF8.self)
-            buffer.removeSubrange(buffer.startIndex...newline)
-            if let event = Self.event(from: line) { events.append(event) }
+    func stop() {
+        let old = process
+        process = nil
+        output?.fileHandleForReading.readabilityHandler = nil
+        try? input?.fileHandleForWriting.close()
+        input = nil
+        output = nil
+        if let old, old.isRunning {
+            old.terminate()
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) {
+                if old.isRunning { kill(old.processIdentifier, SIGKILL) }
+            }
         }
-        guard !events.isEmpty else { return }
-        DispatchQueue.main.async { [weak self] in
-            events.forEach { self?.onEvent?($0) }
+    }
+
+    private final class EventBuffer {
+        private let lock = NSLock()
+        private var data = Data()
+        func receive(_ incoming: Data) -> [Event] {
+            lock.lock()
+            defer { lock.unlock() }
+            data.append(incoming)
+            var events: [Event] = []
+            while let newline = data.firstIndex(of: UInt8(ascii: "\n")) {
+                let line = String(decoding: data[data.startIndex..<newline], as: UTF8.self)
+                data.removeSubrange(data.startIndex...newline)
+                if let event = TmuxEvents.event(from: line) { events.append(event) }
+            }
+            return events
         }
     }
 

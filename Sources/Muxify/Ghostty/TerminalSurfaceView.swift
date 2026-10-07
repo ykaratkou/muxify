@@ -6,6 +6,7 @@ import GhosttyKit
 /// scale and focus. Input handling follows Ghostty's own macOS SurfaceView.
 final class TerminalSurfaceView: NSView {
     private(set) var surface: ghostty_surface_t?
+    weak var delegate: GhosttyRuntimeDelegate?
 
     private var markedText = NSMutableAttributedString()
     /// Non-nil while inside keyDown: collects text produced by interpretKeyEvents.
@@ -21,8 +22,9 @@ final class TerminalSurfaceView: NSView {
         return Unmanaged<TerminalSurfaceView>.fromOpaque(userdata).takeUnretainedValue()
     }
 
-    init?(command: String, workingDirectory: String?) {
+    init?(command: String, workingDirectory: String?, delegate: GhosttyRuntimeDelegate) {
         super.init(frame: NSRect(x: 0, y: 0, width: 900, height: 600))
+        self.delegate = delegate
         guard let app = GhosttyRuntime.shared.app else { return nil }
 
         var config = ghostty_surface_config_new()
