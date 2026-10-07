@@ -10,7 +10,9 @@ final class ExtensionCommandTests: XCTestCase {
         let bin = home.appendingPathComponent(".local/bin")
         try fm.createDirectory(at: resources, withIntermediateDirectories: true)
         try fm.createDirectory(at: bin, withIntermediateDirectories: true)
-        try fm.copyItem(at: repository.appendingPathComponent("bin"), to: resources.appendingPathComponent("bin"))
+        let bundledBin = resources.appendingPathComponent("bin")
+        try fm.createDirectory(at: bundledBin, withIntermediateDirectories: true)
+        try fm.copyItem(at: repository.appendingPathComponent(".build/debug/muxify"), to: bundledBin.appendingPathComponent("muxify"))
         try fm.copyItem(at: repository.appendingPathComponent("extensions"), to: resources.appendingPathComponent("extensions"))
         for path in [".claude", ".codex", ".config/opencode", ".pi/agent"] {
             try fm.createDirectory(at: home.appendingPathComponent(path), withIntermediateDirectories: true)
@@ -26,7 +28,7 @@ final class ExtensionCommandTests: XCTestCase {
         guard (try? CommandRunner().run(CommandInvocation(executable: "/bin/sh", arguments: ["-c", "command -v jq"]), environment: environment)) != nil else {
             throw XCTSkip("The existing Claude/Codex installer requires jq")
         }
-        let invocation = CommandInvocation(executable: "/bin/sh", arguments: [command.path, "extensions", "install"])
+        let invocation = CommandInvocation(executable: command.path, arguments: ["extensions", "install"])
         let first = try CommandRunner().run(invocation, environment: environment)
         let installed = try Data(contentsOf: config)
         let second = try CommandRunner().run(invocation, environment: environment)

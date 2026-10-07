@@ -1,6 +1,8 @@
 /build/
-/vendor/
+/vendor/*
 /Muxify.xcodeproj/
 .DS_Store
 xcuserdata/
 __pycache__/
+/.build/
+/.swiftpm/

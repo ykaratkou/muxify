@@ -15,7 +15,7 @@ struct SessionGroup: Identifiable {
 /// Sessions. Clicking a sidebar Window runs `switch-client -c <our tty> -t
 /// <window>`, so tmux renders it with all its Panes, and anything you do
 /// inside tmux (prefix+n, choose-tree, …) is reflected back into the sidebar.
-@Observable
+@MainActor @Observable
 final class WorkspaceStore {
     private(set) var windows: [TmuxWindow] = []
     /// Agents reporting through their Pane's options (ADR 0004), in tmux order.
@@ -126,10 +126,10 @@ final class WorkspaceStore {
         // Coming back to Muxify reads the Agents in the Window on screen.
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
-        ) { [weak self] _ in self?.refresh() }
+        ) { [weak self] _ in MainActor.assumeIsolated { self?.refresh() } }
         startConnection()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
-            self?.refresh()
+            MainActor.assumeIsolated { self?.refresh() }
         }
     }
 
@@ -330,6 +330,13 @@ final class WorkspaceStore {
             homeDirectory = snapshot.homeDirectory ?? NSHomeDirectory()
         }
         serverID = snapshot.serverID
+        if serverRunning, !snapshot.serverRunning {
+            browsers.values.forEach { $0.tearDown() }
+            browsers.removeAll()
+            persistWork.values.forEach { $0.cancel() }
+            persistWork.removeAll()
+            dirtyBrowsers.removeAll()
+        }
         if windows != snapshot.windows { windows = snapshot.windows }
         let agents = snapshot.agents
         if self.agents != agents { self.agents = agents }
@@ -355,8 +362,8 @@ final class WorkspaceStore {
 
         if snapshot.serverRunning {
             let live = Set(windows.map(\.id))
-            for (id, browser) in browsers where !live.contains(id) {
-                browser.tearDown()
+            for id in browsers.keys where !live.contains(id) {
+                browsers[id]?.tearDown()
                 browsers[id] = nil
                 dirtyBrowsers[id] = nil
                 persistWork.removeValue(forKey: id)?.cancel()
@@ -536,7 +543,7 @@ final class WorkspaceStore {
 
     /// Keyboard focus is in the current Window's Browser (its page or omnibox).
     var isBrowserFocused: Bool {
-        !isTerminalFocused && currentBrowser?.isOpen == true
+        !isTerminalFocused && isBrowserVisible
     }
 
     func focusTerminal() {
@@ -608,6 +615,8 @@ final class WorkspaceStore {
 
     // MARK: - Browser
 
+    var isBrowserVisible: Bool { currentBrowser?.isOpen == true }
+
     /// The Window's Browser, restored from its tmux options on first use.
     func browser(for windowID: String) -> Browser {
         if let browser = browsers[windowID] { return browser }
@@ -616,7 +625,7 @@ final class WorkspaceStore {
         let current = generation
         browser.onChange = { [weak self] browser in
             guard let self, self.generation == current else { return }
-            self.persist(browser)
+            persistWindow(browser.windowID)
         }
         browsers[windowID] = browser
         return browser
@@ -641,24 +650,25 @@ final class WorkspaceStore {
     }
 
     func toggleBrowser() {
-        guard let browser = currentBrowser else { return }
-        setBrowserOpen(!browser.isOpen)
+        setBrowserOpen(!isBrowserVisible)
     }
 
     func focusAddressBar() {
         guard let browser = currentBrowser else { return }
-        browser.setOpen(true)
+        setBrowserOpen(true)
         browser.wantsAddressFocus = true
     }
 
     /// Menu actions for the Browser. Their shortcuts only count when focus is
     /// outside the terminal, where Ghostty/tmux bindings own the keyboard;
     /// clicking the menu item always works.
-    func browserCommand(_ body: (Browser) -> Void) {
+    func browserCommand(opensBrowser: Bool = false, _ body: (Browser) -> Void) {
         if NSApp.currentEvent?.type == .keyDown, isTerminalFocused { return }
+        if NSApp.currentEvent?.type == .keyDown, !opensBrowser, !isBrowserVisible { return }
         guard let browser = currentBrowser else { return }
+        let wasBrowserVisible = isBrowserVisible
         body(browser)
-        if !browser.isOpen { focusTerminal() }
+        if !browser.isOpen, wasBrowserVisible { focusTerminal() }
     }
 
     /// Opens `url` as a Tab in a Window's Browser (the current Window by
@@ -689,17 +699,16 @@ final class WorkspaceStore {
         }
     }
 
-    /// Writes a Browser back onto its tmux Window, coalescing bursts of
+    /// Writes Browser state onto its tmux Window, coalescing bursts of
     /// changes (redirects, quick Tab switching) into one tmux call.
-    private func persist(_ browser: Browser) {
+    private func persistWindow(_ id: String) {
         guard !isShuttingDown else { return }
-        let id = browser.windowID
         let current = generation
         let revision = UUID()
         dirtyBrowsers[id] = revision
         persistWork[id]?.cancel()
-        let work = DispatchWorkItem { [weak self, weak browser] in
-            guard let self, self.generation == current, let browser else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == current, let browser = self.browsers[id] else { return }
             self.persistWork[id] = nil
             self.runAsync(browser.stored.setOptionArgs(windowID: id)) { [weak self] result in
                 guard let self, case .success = result, self.dirtyBrowsers[id] == revision else { return }
@@ -759,6 +768,7 @@ final class WorkspaceStore {
         }
         let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
         let key = event.charactersIgnoringModifiers?.lowercased()
+
         if flags == .command, key == "w" {
             if isBrowserFocused { browserCommand { $0.closeActiveTab() } }
             return nil
@@ -803,7 +813,7 @@ extension WorkspaceStore {
 
 // MARK: - libghostty actions
 
-extension WorkspaceStore: GhosttyRuntimeDelegate {
+extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyOpenURL(_ url: URL) {
         // Cmd+click on a link in the terminal opens it as a Tab in this Window's Browser.
         if let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) {

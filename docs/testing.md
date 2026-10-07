@@ -3,6 +3,8 @@
 Run the normal suite with `make test`. Live SSH tests are skipped unless you
 provide a destination with working key authentication and a verified host key.
 
+## Live SSH test
+
 For an OrbStack Ubuntu VM (use its actual Linux username):
 
 ```sh
@@ -30,3 +32,14 @@ windows, without starting Ghostty or connecting to tmux.
 It creates and removes its own isolated remote tmux server; existing Sessions,
 Agent configuration and SSH setup are left alone. It does not exercise Ghostty
 rendering or the app's UI reconnect scheduler.
+
+## Simulator tests
+
+Run `make test` for CLI, server, browser-script and desktop tests, or `swift test`
+for CLI and server tests. `node --test Tests/SimulatorWeb/*.test.mjs` runs only
+the browser-script race and input tests (no npm dependencies).
+
+Set `MUXIFY_TEST_WEBKIT=1` when running `swift test` to include the
+embedded-browser integration test; it requires a graphical macOS login.
+The opt-in [live Simulator test](../Tests/SimulatorSmoke/README.md) uses
+disposable Devices to validate real browser rendering, shared control and input.

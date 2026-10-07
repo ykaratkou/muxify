@@ -24,7 +24,7 @@ address bar has focus. All available `keybindings` actions are listed below.
 
 All tmux Window navigation stays within the focused App Window's current Session
 and follows sidebar order, not tmux's window indices.
-Switching Windows also switches the Browser and focuses the terminal. If a
+Switching Windows also restores that Window's Browser and focuses the terminal. If a
 numbered position does not exist, the shortcut does nothing.
 
 Use **Muxify → Open Config** to open `~/.config/muxify/config.yaml` (or
@@ -78,7 +78,8 @@ terminal has focus, Ghostty bindings can take precedence over menu shortcuts.
 | ⌘ + backquote | Focus the terminal |
 | ⌘⇧, | Reload the Muxify Config and Ghostty config |
 
-**Browser shortcuts** apply when focus is outside the terminal:
+**Browser shortcuts** apply when the Browser has focus. Menu clicks work even
+when it does not. New Tab and Open Location can reveal a hidden Browser:
 
 | Shortcut | Action |
 | --- | --- |
@@ -99,3 +100,10 @@ assign it to a configurable action.
 
 Other terminal keybindings come from your Ghostty config and tmux bindings,
 not the Muxify Config.
+
+**Simulator input** is handled by its web page after clicking the Device screen.
+Drag to swipe and type ordinary keys/modifiers; losing focus or disconnecting
+releases held input. Home, rotation, Start Device and Stop Device are web controls,
+not desktop menu actions. Browser/OS-reserved shortcuts and Muxify's configured
+bindings remain on the Mac. There is no `toggle_simulator` action or native phone
+toggle; open the Simulator Server's URL as an ordinary Browser Tab.

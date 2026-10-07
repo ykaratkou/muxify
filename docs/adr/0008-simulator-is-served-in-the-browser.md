@@ -1,0 +1,9 @@
+# Simulator is served in the browser
+
+The Simulator runs as a standalone server on the Mac that owns the Devices, with a web interface usable in Muxify's Browser or any external browser. This replaces the native Simulator panel and its mode toggle: a server launched over SSH must not require the Muxify desktop app, Ghostty or tmux, and both local and remote use should share one interface.
+
+The first implementation serves JPEG frames and ordered control messages over one WebSocket, with a bounded frame rate and independent browser acknowledgements so a slow tab cannot stall other tabs or build up a video backlog. Device selection belongs to each browser connection, not a tmux Window. Multiple connections may select and control the same Device: one shared backend connection owns its display and serializes complete control operations, including across asynchronous backend calls. Start, Stop, Home and rotation affect every viewer; disconnect releases only that browser's input and closes the backend connection only after the last viewer leaves, without stopping the Device. Keyboard holds are reference-counted and a single-touch gesture belongs to its initiating connection, rather than allowing concurrent tabs to interrupt each other's swipes.
+
+Physical frame orientation is shared too, but is not the guest app's interface orientation. Rotation turns the browser's minimal iPhone/iPad frame and notifies the guest, even if SpringBoard or a portrait-only app refuses to change its layout. Re-reading the app's display orientation must not silently undo a requested physical turn.
+
+The server listens on loopback, requires a per-process token, and can be privately exposed through Tailscale Serve or an SSH tunnel. It does not configure Tailscale, publish through Funnel, or promise operation without a macOS graphical login until that environment has been validated. Hardware-encoded video can replace JPEG without changing the Device backend.

@@ -4,7 +4,7 @@ import Observation
 
 /// One process/Config, with independent workspaces and owned connections for
 /// each native App Window. Closing a window cleans only that workspace.
-@Observable
+@MainActor @Observable
 final class AppWindows {
     let configStore: ConfigStore
     let initialRequest: AppWindowRequest
@@ -88,8 +88,12 @@ final class AppWindows {
         window.tabbingMode = .disallowed
         let center = NotificationCenter.default
         observers[id] = [
-            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in self?.focus(id) },
-            center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in self?.close(id) },
+            center.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.focus(id) }
+            },
+            center.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.close(id) }
+            },
         ]
         if window.isKeyWindow { focus(id) }
     }
@@ -138,7 +142,7 @@ final class AppWindows {
     }
 }
 
-extension AppWindows: GhosttyRuntimeDelegate {
+extension AppWindows: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyOpenURL(_ url: URL) { focusedStore?.ghosttyOpenURL(url) }
     func ghosttyNewTab() { focusedStore?.ghosttyNewTab() }
     func ghosttyNewWindow() { newWindow() }

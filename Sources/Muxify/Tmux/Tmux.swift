@@ -248,6 +248,7 @@ enum Tmux {
         return parseSnapshot(output)
     }
 
+    /// Pure parser, shared by live snapshots and persistence/migration tests.
     static func parseSnapshot(_ output: String) -> TmuxSnapshot {
         let s = separator
         var windows: [TmuxWindow] = []

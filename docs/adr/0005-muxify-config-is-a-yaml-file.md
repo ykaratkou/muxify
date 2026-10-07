@@ -1,6 +1,6 @@
 # Muxify's Config is a YAML file, and its keybinds win over Ghostty's
 
-Muxify's settings live only in its Config, `$XDG_CONFIG_HOME/muxify/config.yaml`: one YAML file, with `snake_case` keys grouped in sections. The UI never writes or overrides a setting. It can open the file and show which keybinds are in effect. What is open or shown now (the Sidebar, the Browser) stays UI state and is never in the Config. The Config also names the Ghostty config the terminal uses (`ghostty.config_file`). Muxify loads it the same way as `ghostty --config-file=`: Ghostty's default files first, then that file on top.
+Muxify's desktop settings live only in its Config, `$XDG_CONFIG_HOME/muxify/config.yaml`: one YAML file, with `snake_case` keys grouped in sections. The UI never writes or overrides a setting. It can open the file and show which keybinds are in effect. What is open or shown now (Sidebar and Browser visibility, Browser Tabs, and the Simulator's selected Device) stays UI state and is never in the Config. The standalone Simulator Server uses explicit CLI options rather than the desktop Config so it can run without the app. The Config also names the Ghostty config the terminal uses (`ghostty.config_file`). Muxify loads it the same way as `ghostty --config-file=`: Ghostty's default files first, then that file on top.
 
 ```yaml
 ghostty:

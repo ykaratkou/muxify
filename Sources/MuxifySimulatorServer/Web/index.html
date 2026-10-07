@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Muxify Simulator</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="title">
+          <span class="mark" aria-hidden="true">m</span>
+          <strong>Muxify <span>Simulator</span></strong>
+        </div>
+        <span class="connection">
+          <i id="connection-dot" aria-hidden="true"></i>
+          <span id="connection" role="status">Connecting…</span>
+        </span>
+      </header>
+      <section class="toolbar" aria-label="Device controls">
+        <div class="picker">
+          <label for="devices">DEVICE</label>
+          <select id="devices"><option value="">Choose a Device</option></select>
+        </div>
+        <div class="actions">
+          <button id="start" class="primary" aria-label="Start Device" disabled>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 9 6-9 6Z"/></svg>
+            <span>Start<span class="wide-label"> Device</span></span>
+          </button>
+          <button id="stop" aria-label="Stop Device" disabled>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1"/></svg>
+            <span>Stop<span class="wide-label"> Device</span></span>
+          </button>
+          <span class="divider" aria-hidden="true"></span>
+          <button id="home" disabled title="Go to Home screen">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m3 9 7-6 7 6M5 8v9h10V8M8 17v-6h4v6"/></svg>
+            <span>Home</span>
+          </button>
+          <button id="rotate" disabled title="Rotate clockwise">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 7a6.5 6.5 0 1 0 .3 5M16 3v4h-4"/></svg>
+            <span>Rotate</span>
+          </button>
+          <button id="retry" class="icon-button" aria-label="Refresh Devices or retry connection" title="Refresh Devices or retry connection">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 7a6.5 6.5 0 0 0-11-2L3 7m0-4v4h4M4 13a6.5 6.5 0 0 0 11 2l2-2m0 4v-4h-4"/></svg>
+          </button>
+        </div>
+      </section>
+      <div class="statusbar">
+        <span id="device-detail">No Device selected</span>
+        <span id="viewers" title="Browsers viewing this Device" hidden></span>
+      </div>
+      <div id="message" role="status" hidden></div>
+      <section class="stage" aria-label="Device display">
+        <div id="device-frame" class="device-frame iphone" hidden>
+          <canvas id="screen" tabindex="0" aria-label="Device screen. Click to focus, drag to swipe, type to control." hidden></canvas>
+        </div>
+        <div id="empty">
+          <svg class="empty-device" viewBox="0 0 56 80" aria-hidden="true"><rect x="9" y="3" width="38" height="74" rx="10"/><path d="M23 10h10M23 69h10"/></svg>
+          <h1 id="placeholder">Choose a Device</h1>
+          <p id="empty-detail">Select an iPhone or iPad above.<br>It only starts when you choose Start Device.</p>
+        </div>
+      </section>
+      <footer>
+        <span>Click to type <b>·</b> Drag to swipe</span>
+        <span class="lifetime">Devices keep running when you close this tab.</span>
+      </footer>
+    </main>
+  </body>
+</html>

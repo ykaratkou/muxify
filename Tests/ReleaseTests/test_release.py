@@ -174,6 +174,26 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual((resources / "ThirdPartyNotices/Ghostty.txt").read_text(), "Ghostty license\n")
         self.assertIn("Yams license", (resources / "ThirdPartyNotices/Yams.txt").read_text())
 
+    def test_simulator_bundle_preserves_incorporated_code_and_dependency_licenses(self):
+        shutil.copy(ROOT / "scripts/bundle-simulator-notices.sh", self.root / "scripts")
+        notice = (ROOT / "Resources/ThirdPartyNotices/Simulator.txt").read_text()
+        self.write("Resources/ThirdPartyNotices/Simulator.txt", notice)
+        for package in ["swift-nio", "swift-atomics", "swift-collections", "swift-system"]:
+            self.write(f".build/checkouts/{package}/LICENSE.txt", f"{package} license\n")
+        self.write(".build/checkouts/swift-nio/NOTICE.txt", "NIO notice\n")
+        self.write(".build/checkouts/swift-nio/Sources/CNIOLLHTTP/LICENSE", "llhttp license\n")
+        destination = self.root / "products/ThirdPartyNotices"
+        result = subprocess.run(
+            ["/bin/sh", str(self.root / "scripts/bundle-simulator-notices.sh"), str(destination)],
+            cwd=self.root, env=self.env, text=True, capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((destination / "Simulator.txt").read_text(), notice)
+        self.assertIn("Copyright (c) 2026 Samuel Abada", notice)
+        self.assertIn("The above copyright notice and this permission notice shall be included", notice)
+        self.assertEqual((destination / "swift-nio-LICENSE.txt").read_text(), "swift-nio license\n")
+        self.assertEqual((destination / "llhttp-LICENSE.txt").read_text(), "llhttp license\n")
+
     def test_bundle_rejects_missing_themes_or_shell_integration(self):
         self.bundle_fixture()
         path = self.root / "vendor/ghostty/resources/ghostty/shell-integration/zsh/ghostty-integration"

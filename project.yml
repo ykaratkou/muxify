@@ -34,11 +34,6 @@ targets:
       - path: extensions
         type: folder
         buildPhase: resources
-      # The `muxify` command line tool (Contents/Resources/bin/muxify), which
-      # Muxify ▸ Install Command Line Tool links into ~/.local/bin.
-      - path: bin
-        type: folder
-        buildPhase: resources
     info:
       path: Resources/Info.plist
       properties:
@@ -77,6 +72,11 @@ targets:
     scheme:
       testTargets: [MuxifyTests]
     postBuildScripts:
+      # Build the unified CLI into Contents/Resources/bin/muxify; the app's
+      # Install Command Line Tool action links it into ~/.local/bin.
+      - name: Bundle Muxify CLI
+        script: "/bin/sh \"$PROJECT_DIR/scripts/bundle-cli.sh\""
+        basedOnDependencyAnalysis: false
       - name: Bundle Ghostty resources
         script: "\"$PROJECT_DIR/scripts/bundle-ghostty-resources.sh\""
         basedOnDependencyAnalysis: false

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// App-wide menus act on the focused App Window, never on the last workspace
 /// to start a terminal or reconnect.
-struct MuxifyCommands: Commands {
+@MainActor struct MuxifyCommands: Commands {
     let windows: AppWindows
     private var store: WorkspaceStore? { windows.focusedStore }
     private var configStore: ConfigStore { windows.configStore }
@@ -27,7 +27,7 @@ struct MuxifyCommands: Commands {
             Button("New Muxify Window") { windows.newWindow() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .newAppWindow)?.shortcut)
             Divider()
-            Button("New Tab") { store?.browserCommand { $0.newTab() } }
+            Button("New Tab") { store?.browserCommand(opensBrowser: true) { $0.newTab() } }
                 .keyboardShortcut("t", modifiers: .command)
                 .disabled(store == nil)
             Button("New tmux Window") { store?.newWindow() }
@@ -38,9 +38,9 @@ struct MuxifyCommands: Commands {
         // Browser shortcuts act outside the terminal; in the terminal the
         // user's Ghostty/tmux bindings own these keys.
         CommandMenu("Browser") {
-            Button(store?.currentBrowser?.isOpen == true ? "Hide Browser" : "Show Browser") { store?.toggleBrowser() }
+            Button(store?.isBrowserVisible == true ? "Hide Browser" : "Show Browser") { store?.toggleBrowser() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .toggleBrowser)?.shortcut)
-            Button("Open Location…") { store?.browserCommand { _ in store?.focusAddressBar() } }
+            Button("Open Location…") { store?.browserCommand(opensBrowser: true) { _ in store?.focusAddressBar() } }
                 .keyboardShortcut("l", modifiers: .command)
             Divider()
             Button("Close Tab") { store?.browserCommand { $0.closeActiveTab() } }

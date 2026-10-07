@@ -1,6 +1,6 @@
 import AppKit
 
-/// Muxify ▸ Install Command Line Tool: links the `muxify` script bundled at
+/// Muxify ▸ Install Command Line Tool: links the `muxify` executable bundled at
 /// `Contents/Resources/bin/muxify` into `~/.local/bin`, so any Pane can run
 /// `muxify browser open <url>`.
 enum CommandLineToolInstaller {

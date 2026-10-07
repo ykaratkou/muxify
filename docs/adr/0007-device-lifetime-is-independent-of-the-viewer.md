@@ -1,0 +1,3 @@
+# Device lifetime is independent of the viewer
+
+Selecting a Device or opening the Simulator never starts it: a selected stopped Device offers **Start Device**, and only that explicit action may boot it. **Stop Device** explicitly shuts down the selected Device and retains its selection; closing or disconnecting the browser, changing selection, or exiting the Simulator Server only detaches display and input connections. Devices may also be used by Xcode or Apple's Device Hub, so viewer connections must not own their lifetime; external shutdowns are respected without automatic restarts, and an externally started Device can be reconnected without booting it.

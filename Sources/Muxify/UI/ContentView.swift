@@ -4,9 +4,7 @@ struct ContentView: View {
     let store: WorkspaceStore
     let configStore: ConfigStore
     @AppStorage("sidebarWidth") private var sidebarWidth: Double = 260
-    /// The Browser's share of the room beside the sidebar, the same for every
-    /// Window's Browser. A share rather than a width, so resizing the window
-    /// keeps terminal and Browser in proportion.
+    /// The Browser's share of the room beside the sidebar, common to all Windows.
     @AppStorage("browserShare") private var browserShare: Double = 0.45
 
     var body: some View {
@@ -29,9 +27,9 @@ struct ContentView: View {
                     PanelResizeHandle(width: browserWidth, range: 320...browserMax, edge: .trailing) {
                         browserShare = $0 / room
                     }
-                    BrowserPanel(browser: browser)
-                        .id(browser.windowID)
-                        .frame(width: browserWidth)
+                    BrowserPanel(browser: browser).id(browser.windowID)
+                    .frame(width: browserWidth)
+                    .background(Color(nsColor: .windowBackgroundColor))
                 }
             }
         }
@@ -71,7 +69,6 @@ private struct HeaderBar: View {
     let height: CGFloat
 
     var body: some View {
-        let browserOpen = store.currentBrowser?.isOpen ?? false
         HStack(spacing: 2) {
             Spacer()
             EnvironmentSelector(environments: store.remoteEnvironments, activeEnvironment: store.activeEnvironment,
@@ -85,8 +82,8 @@ private struct HeaderBar: View {
             )
             TitlebarButton(
                 systemName: "sidebar.right",
-                help: help(browserOpen ? "Hide Browser" : "Show Browser", .toggleBrowser),
-                isOn: browserOpen,
+                help: help(store.isBrowserVisible ? "Hide Browser" : "Show Browser", .toggleBrowser),
+                isOn: store.isBrowserVisible,
                 action: store.toggleBrowser
             )
         }

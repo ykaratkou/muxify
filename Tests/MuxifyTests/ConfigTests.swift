@@ -21,6 +21,7 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.keybinds.action(for: trigger("ctrl+cmd+s")), .toggleSidebar)
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
             XCTAssertEqual(config.keybinds.action(for: trigger("cmd+n")), .newAppWindow)
+            XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+b")))
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
             XCTAssertNil(config.ghosttyConfigFile)
@@ -106,6 +107,13 @@ final class ConfigTests: XCTestCase {
                 XCTAssertEqual(config.keybinds.firstTrigger(for: action), key)
             }
         }
+    }
+
+    func testRemovedSimulatorBindingIsReportedWithoutChangingBrowser() throws {
+        let config = try load("keybindings:\n  toggle_simulator: cmd+i")
+        XCTAssertNil(config.keybinds.action(for: trigger("cmd+i")))
+        XCTAssertEqual(config.keybinds.action(for: trigger("cmd+b")), .toggleBrowser)
+        XCTAssertEqual(config.problems.map(\.message), ["unknown action \"toggle_simulator\""])
     }
 
     func testNumberedWindowKeybindingsCanBeRemappedOrDisabled() throws {

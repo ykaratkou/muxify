@@ -1,6 +1,6 @@
 # Muxify
 
-A personal macOS front end for tmux. It has a sidebar of tmux windows, a terminal showing the selected window, and a browser panel beside the terminal. tmux owns sessions, windows and panes; Muxify adds the browser.
+A personal macOS front end for tmux with a Sidebar, Terminal and Browser. Muxify also provides a Simulator that can be opened in any web browser to interact with Devices on a local or remote Mac.
 
 ## Language
 
@@ -35,12 +35,26 @@ _Avoid_: split, terminal
 ### Browser
 
 **Browser**:
-The web panel beside the terminal. Each Window has its own Browser, which remembers whether it is open and which Tabs it holds; switching Windows switches the Browser too.
+The web browsing view beside the Terminal. Each Window has its own Browser and Tabs; switching Windows switches the Browser too.
 _Avoid_: webview, inspector, sidebar browser
 
 **Tab**:
 One page in a Window's Browser, with its own back/forward history. "Tab" never means a tmux Window.
 _Avoid_: page (when you mean the Tab itself), browser window
+
+### Simulator
+
+**Simulator**:
+The browser-based interface for selecting, viewing and controlling Devices on a Mac. It is independent of tmux Windows and can be opened in Muxify's Browser or another web browser. Each browser tab chooses its own Device; multiple tabs may view and control the same Device, sharing its screen, orientation and running state.
+_Avoid_: Device Hub, mirror, simulator runtime
+
+**Device**:
+A simulated iPhone or iPad used to run and test apps, never a physical phone or tablet. Its selection and running state are independent: selecting or displaying it does not mean starting it.
+_Avoid_: simulator (when you mean the Device rather than its view), phone (when you also mean iPad)
+
+**Simulator Server**:
+The Muxify process on the Mac that makes its Devices available to the Simulator. Devices can keep running when the Simulator disconnects or the Simulator Server exits.
+_Avoid_: desktop streamer, remote desktop
 
 ### Agents
 
