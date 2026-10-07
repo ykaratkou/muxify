@@ -4,6 +4,35 @@ import XCTest
 @testable import MuxifyCLI
 
 final class CLIIntegrationTests: XCTestCase {
+    func testShortLivedProcessesCanBeAwaitedRepeatedly() async throws {
+        for _ in 0..<10 {
+            for (executable, status) in [("/usr/bin/true", Int32(0)), ("/usr/bin/false", Int32(1))] {
+                let process = makeProcess(URL(fileURLWithPath: executable), arguments: [], output: Pipe())
+                try process.run()
+                defer { stopIfRunning(process) }
+                try await waitForExit(process)
+                XCTAssertEqual(process.terminationStatus, status)
+            }
+        }
+    }
+
+    func testSubprocessWaitTimesOutAndCleanupKillsProcess() async throws {
+        let process = makeProcess(URL(fileURLWithPath: "/bin/sleep"), arguments: ["30"], output: Pipe())
+        try process.run()
+        defer { stopIfRunning(process) }
+        let start = Date()
+        do {
+            try await waitForExit(process, timeout: 0.05)
+            XCTFail("Expected subprocess wait to time out")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "CLI did not exit before the timeout")
+        }
+        XCTAssertTrue(process.isRunning)
+        stopIfRunning(process)
+        XCTAssertFalse(process.isRunning)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 3)
+    }
+
     func testRelocatedBinaryAndInstalledSymlinkSupportHelpAndValidation() async throws {
         let tool = try standaloneCLI()
         defer { try? FileManager.default.removeItem(at: tool.deletingLastPathComponent()) }
@@ -93,17 +122,21 @@ final class CLIIntegrationTests: XCTestCase {
                                 output: String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))
     }
 
-    private func waitForExit(_ process: Process) async throws {
-        let deadline = Date().addingTimeInterval(5)
+    private func waitForExit(_ process: Process, timeout: TimeInterval = 5) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         guard !process.isRunning else { throw CLIError("CLI did not exit before the timeout") }
-        process.waitUntilExit()
+        // Async tasks can resume on a different thread than Process.run().
+        // waitUntilExit() can then hang in a thread-local run loop even after exit.
+        // Once isRunning is false, terminationStatus is already available.
     }
 
     private func stopIfRunning(_ process: Process) {
         if process.isRunning {
             kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
+            let deadline = Date().addingTimeInterval(2)
+            while process.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            XCTAssertFalse(process.isRunning, "CLI did not exit after SIGKILL")
         }
     }
 

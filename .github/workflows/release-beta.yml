@@ -53,6 +53,9 @@ jobs:
         run: make setup
 
       - name: Test Muxify
+        timeout-minutes: 10
+        env:
+          NSUnbufferedIO: 'YES'
         run: make test
 
       - name: Build and package ad-hoc-signed beta
