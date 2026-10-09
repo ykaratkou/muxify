@@ -261,6 +261,49 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
+    @MainActor func testSidebarTypographyReloadIsSharedAndDoesNotChangeWindowState() throws {
+        try withWindows { windows, path in
+            let localRequest = AppWindowRequest()
+            let remoteRequest = AppWindowRequest(environmentName: "Home")
+            let local = windows.store(for: localRequest)
+            let remote = windows.store(for: remoteRequest)
+            local.sessionsVisible = false
+            remote.agentsVisible = false
+            let localState = (local.selectedWindowID, local.sidebarVisible, local.sessionsVisible, local.agentsVisible)
+            let remoteState = (remote.selectedWindowID, remote.sidebarVisible, remote.sessionsVisible, remote.agentsVisible)
+            let defaults = UserDefaults.standard
+            let expansion = defaults.object(forKey: "expandedSessions") as? [String]
+            let split = defaults.object(forKey: "sidebarAgentsFraction") as? Double
+
+            try (Self.config + "\nui:\n  sidebar:\n    font_size: 18\n    font_family: system\n")
+                .write(toFile: path, atomically: true, encoding: .utf8)
+            windows.configStore.reload()
+            XCTAssertEqual(windows.configStore.config.sidebarTypography, SidebarTypography(fontSize: 18))
+            XCTAssertTrue(local === windows.store(for: localRequest))
+            XCTAssertTrue(remote === windows.store(for: remoteRequest))
+            XCTAssertEqual(local.selectedWindowID, localState.0)
+            XCTAssertEqual(local.sidebarVisible, localState.1)
+            XCTAssertEqual(local.sessionsVisible, localState.2)
+            XCTAssertEqual(local.agentsVisible, localState.3)
+            XCTAssertEqual(remote.selectedWindowID, remoteState.0)
+            XCTAssertEqual(remote.sidebarVisible, remoteState.1)
+            XCTAssertEqual(remote.sessionsVisible, remoteState.2)
+            XCTAssertEqual(remote.agentsVisible, remoteState.3)
+            XCTAssertEqual(remote.environmentName, "Home")
+            XCTAssertEqual(defaults.object(forKey: "expandedSessions") as? [String], expansion)
+            XCTAssertEqual(defaults.object(forKey: "sidebarAgentsFraction") as? Double, split)
+
+            try (Self.config + "\nui: [").write(toFile: path, atomically: true, encoding: .utf8)
+            windows.configStore.reload()
+            XCTAssertEqual(windows.configStore.config.sidebarTypography, SidebarTypography(fontSize: 18))
+            XCTAssertEqual(windows.configStore.problems.count, 1)
+            try Self.config.write(toFile: path, atomically: true, encoding: .utf8)
+            windows.configStore.reload()
+            XCTAssertEqual(windows.configStore.config.sidebarTypography, SidebarTypography())
+            XCTAssertEqual(windows.configStore.problems, [])
+        }
+    }
+
     @MainActor private func keyEvent(window: NSWindow, flags: NSEvent.ModifierFlags,
                                     characters: String = "n", keyCode: UInt16 = 0x2D) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,

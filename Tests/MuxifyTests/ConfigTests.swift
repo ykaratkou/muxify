@@ -4,7 +4,7 @@ final class ConfigTests: XCTestCase {
     private let root = "/cfg/muxify/config.yaml"
 
     private func load(_ files: [String: String]) throws -> Config {
-        try Config.load(path: root) { files[$0] }.get()
+        try Config.load(path: root, fontFamilies: { ["Test Sans", "Test Mono"] }) { files[$0] }.get()
     }
 
     private func load(_ text: String) throws -> Config {
@@ -28,6 +28,7 @@ final class ConfigTests: XCTestCase {
             XCTAssertNil(config.keybinds.action(for: trigger("cmd+shift+b")))
             XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+s"))
             XCTAssertEqual(config.headerHeight, 30)
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography())
             XCTAssertNil(config.ghosttyConfigFile)
             XCTAssertEqual(config.problems, [])
         }
@@ -39,6 +40,126 @@ final class ConfigTests: XCTestCase {
             XCTAssertEqual(config.headerHeight, height)
             XCTAssertEqual(config.keybinds, .defaults)
             XCTAssertEqual(config.problems, [])
+        }
+    }
+
+    func testSidebarTypographyDefaultsPreserveExistingConfig() throws {
+        for text in ["ui: {}", "ui:\n  sidebar: {}", "ui:\n  header_height: 26",
+                     "ui:\n  sidebar:\n    font_size: 12\n    font_family: system"] {
+            let config = try load(text)
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography(), text)
+            XCTAssertEqual(config.problems, [], text)
+            XCTAssertEqual(config.keybinds, .defaults, text)
+        }
+    }
+
+    func testSidebarSizeAcceptsPositiveWholeAndFractionalPoints() throws {
+        for size in [0.5, 8, 12, 12.5, 18, 24, 128, 1e6] {
+            let config = try load("ui:\n  header_height: 26\n  sidebar:\n    font_size: \(size)")
+            XCTAssertEqual(config.sidebarTypography.fontSize, size)
+            XCTAssertEqual(config.sidebarTypography.fontFamily, "system")
+            XCTAssertEqual(config.headerHeight, 26)
+            XCTAssertEqual(config.problems, [])
+        }
+    }
+
+    func testInvalidSidebarSizeFallsBackWithoutBlockingFamilyOrOtherSettings() throws {
+        for value in ["0", "-1", ".inf", "-.inf", ".nan", "1e309", "wrong", "true", "false",
+                      "", "null", "~", "[12]", "{size: 12}", "\"12\"", "!!str 12"] {
+            let config = try load("""
+            ui:
+              header_height: 26
+              sidebar:
+                font_size: \(value)
+                font_family: Test Sans
+            keybindings:
+              toggle_sidebar: cmd+e
+            """)
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography(fontSize: 12, fontFamily: "Test Sans"), value)
+            XCTAssertEqual(config.headerHeight, 26, value)
+            XCTAssertEqual(config.keybinds.firstTrigger(for: .toggleSidebar), trigger("cmd+e"), value)
+            XCTAssertEqual(config.problems, [
+                ConfigProblem(path: root, line: 4, message: "ui.sidebar.font_size: expected a finite number greater than zero points"),
+            ], value)
+        }
+    }
+
+    func testSidebarFamilyUsesCanonicalCaseAndTrimsWhitespace() throws {
+        for (value, expected) in [("system", "system"), ("\" SyStEm \"", "system"),
+                                  ("Test Sans", "Test Sans"), ("\" test SANS \"", "Test Sans"),
+                                  ("'TEST MONO'", "Test Mono")] {
+            let config = try load("ui:\n  sidebar:\n    font_family: \(value)")
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography(fontSize: 12, fontFamily: expected))
+            XCTAssertEqual(config.problems, [])
+        }
+    }
+
+    func testSidebarFamilyRequiresARealNonemptyYamlString() throws {
+        for value in ["", "null", "~", "false", "true", "123", "12.5", "[]", "{}", "\"\"", "'   '",
+                      "\"Test\\nSans\"", "\"Test\\tSans\"", "!!int 12"] {
+            let config = try load("ui:\n  sidebar:\n    font_family: \(value)\n    font_size: 18")
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography(fontSize: 18), value)
+            XCTAssertEqual(config.problems, [
+                ConfigProblem(path: root, line: 3, message: "ui.sidebar.font_family: expected a nonempty font family name"),
+            ], value)
+        }
+        // Numeric/boolean-looking strings remain strings, not coerced scalars.
+        for value in ["\"123\"", "\"true\"", "!!str 123"] {
+            let config = try Config.load(path: root, fontFamilies: { ["123", "true"] }) {
+                _ in "ui:\n  sidebar:\n    font_family: \(value)"
+            }.get()
+            XCTAssertTrue(["123", "true"].contains(config.sidebarTypography.fontFamily))
+            XCTAssertEqual(config.problems, [])
+        }
+    }
+
+    func testUnavailableSidebarFamilyFallsBackWithoutBlockingSize() throws {
+        for name in ["Missing Font", "TestSans-Regular", "/fonts/Test.ttf"] {
+            let config = try load("ui:\n  sidebar:\n    font_family: \" \(name) \"\n    font_size: 18")
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography(fontSize: 18))
+            XCTAssertEqual(config.problems, [
+                ConfigProblem(path: root, line: 3, message: "ui.sidebar.font_family: font family \"\(name)\" is not installed"),
+            ])
+        }
+    }
+
+    func testSidebarMappingAndUnknownKeysKeepValidSiblings() throws {
+        for value in ["12", "[]", "null", "system"] {
+            let config = try load("ui:\n  sidebar: \(value)\n  header_height: 26")
+            XCTAssertEqual(config.sidebarTypography, SidebarTypography())
+            XCTAssertEqual(config.headerHeight, 26)
+            XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 2, message: "ui.sidebar: expected a mapping")])
+        }
+        let config = try load("ui:\n  sidebar:\n    font_size: 18\n    font_weight: bold\n    font_family: Test Mono")
+        XCTAssertEqual(config.sidebarTypography, SidebarTypography(fontSize: 18, fontFamily: "Test Mono"))
+        XCTAssertEqual(config.problems, [ConfigProblem(path: root, line: 4, message: "unknown key \"ui.sidebar.font_weight\"")])
+    }
+
+    func testSidebarReloadRetainsLastGoodOnSyntaxErrorsAndResetsRemovedValues() throws {
+        var loaded = LoadedConfig()
+        func update(_ text: String?) {
+            loaded.update(with: Config.load(path: root, fontFamilies: { ["Test Sans"] }) { _ in text })
+        }
+        let custom = "ui:\n  sidebar:\n    font_size: 18\n    font_family: Test Sans"
+        update(custom)
+        XCTAssertEqual(loaded.config.sidebarTypography, SidebarTypography(fontSize: 18, fontFamily: "Test Sans"))
+        for badYaml in ["ui: [", "ui:\n  sidebar:\n    font_size: 18\n    font_size: 24"] {
+            update(badYaml)
+            XCTAssertEqual(loaded.config.sidebarTypography, SidebarTypography(fontSize: 18, fontFamily: "Test Sans"))
+            XCTAssertEqual(loaded.problems.count, 1)
+        }
+        update("ui:\n  sidebar:\n    font_size: wrong\n    font_family: Test Sans")
+        XCTAssertEqual(loaded.config.sidebarTypography, SidebarTypography(fontFamily: "Test Sans"))
+        update("ui:\n  sidebar:\n    font_size: 24\n    font_family: Missing")
+        XCTAssertEqual(loaded.config.sidebarTypography, SidebarTypography(fontSize: 24))
+        update("ui:\n  sidebar:\n    font_size: false\n    font_family: null")
+        XCTAssertEqual(loaded.config.sidebarTypography, SidebarTypography())
+        XCTAssertEqual(loaded.problems.count, 2)
+        for removed in ["ui:\n  sidebar: {}", "ui: {}", "keybindings: {}", "", nil] {
+            update(custom)
+            update(removed)
+            XCTAssertEqual(loaded.config.sidebarTypography, SidebarTypography())
+            XCTAssertEqual(loaded.problems, [])
         }
     }
 
@@ -434,6 +555,7 @@ final class ConfigTests: XCTestCase {
         let config = try load(Config.template)
         XCTAssertEqual(config.keybinds, Keybinds.defaults)
         XCTAssertEqual(config.headerHeight, 30)
+        XCTAssertEqual(config.sidebarTypography, SidebarTypography())
         XCTAssertNil(config.ghosttyConfigFile)
         XCTAssertEqual(config.problems, [])
     }
@@ -445,6 +567,16 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(shown.count, 2)
         let config = try load(shown.joined(separator: "\n"))
         XCTAssertEqual(config.headerHeight, Config().headerHeight)
+        XCTAssertEqual(config.problems, [])
+    }
+
+    func testTheSidebarTypographyTheTemplateShowsIsTheDefault() throws {
+        let shown = Config.template.split(separator: "\n").filter { line in
+            line.hasPrefix("# ui:") || line.hasPrefix("#   sidebar:") || line.hasPrefix("#     font_")
+        }.map { $0.dropFirst(2) }
+        XCTAssertEqual(shown.count, 4)
+        let config = try load(shown.joined(separator: "\n"))
+        XCTAssertEqual(config.sidebarTypography, Config().sidebarTypography)
         XCTAssertEqual(config.problems, [])
     }
 

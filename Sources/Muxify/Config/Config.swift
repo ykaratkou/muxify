@@ -21,6 +21,8 @@ struct Config: Equatable {
     var keybinds = Keybinds.defaults
     /// Height of the app's header in points; at least 24 to fit its buttons.
     var headerHeight: Double = 30
+    /// Typography of the Sidebar's Sessions and Agents, not the terminal.
+    var sidebarTypography = SidebarTypography()
     /// The Ghostty config file the terminal loads on top of Ghostty's
     /// default files, as an absolute path.
     var ghosttyConfigFile: String?
@@ -36,7 +38,9 @@ struct Config: Equatable {
     /// Reads the Config at `path`. A missing file gives the defaults. A value
     /// that cannot apply is skipped and recorded in `problems`; a syntax error
     /// fails the whole read.
-    static func load(path: String, read: (String) -> String?) -> Result<Config, ConfigSyntaxError> {
+    static func load(path: String,
+                     fontFamilies: @escaping () -> [String] = { SidebarTypography.fontFamilies },
+                     read: (String) -> String?) -> Result<Config, ConfigSyntaxError> {
         guard let text = read(path) else { return .success(Config()) }
         let root: Node?
         do {
@@ -46,7 +50,7 @@ struct Config: Equatable {
         }
         guard let root else { return .success(Config()) }
         return withoutActuallyEscaping(read) { read in
-            var reader = ConfigReader(path: path, read: read)
+            var reader = ConfigReader(path: path, read: read, fontFamilies: fontFamilies)
             reader.readSections(root)
             return .success(reader.config)
         }
@@ -69,6 +73,12 @@ struct Config: Equatable {
         # ui:
         #   # Header height in points (minimum 24). Changes apply live.
         #   header_height: 30
+        #   sidebar:
+        #     # Positive base size in points; other text scales proportionally.
+        #     # Changes apply live. Invalid values use the defaults below.
+        #     font_size: 12
+        #     # system, or an installed macOS font family (case-insensitive).
+        #     font_family: system
         #
         # remote_environments:
         #   - name: Macbook Home
@@ -134,6 +144,7 @@ private extension ConfigSyntaxError {
 private struct ConfigReader {
     let path: String
     let read: (String) -> String?
+    let fontFamilies: () -> [String]
     var config = Config()
 
     static let sections: [String: (inout ConfigReader, Node) -> Void] = [
@@ -254,8 +265,38 @@ private struct ConfigReader {
                     continue
                 }
                 config.headerHeight = height
+            case "sidebar":
+                readSidebar(value)
             default:
                 problem(at: key, "unknown key \"ui.\(name)\"")
+            }
+        }
+    }
+
+    mutating func readSidebar(_ node: Node) {
+        for (name, key, value) in entries(of: node, "ui.sidebar") {
+            switch name {
+            case "font_size":
+                guard value.tag == Tag(.int) || value.tag == Tag(.float),
+                      let size = value.float, size.isFinite, size > 0 else {
+                    problem(at: value, "ui.sidebar.font_size: expected a finite number greater than zero points")
+                    continue
+                }
+                config.sidebarTypography.fontSize = size
+            case "font_family":
+                guard value.tag == Tag(.str), let name = value.string,
+                      !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      name.rangeOfCharacter(from: .controlCharacters) == nil else {
+                    problem(at: value, "ui.sidebar.font_family: expected a nonempty font family name")
+                    continue
+                }
+                guard let family = SidebarTypography.canonicalFamily(name, families: fontFamilies) else {
+                    problem(at: value, "ui.sidebar.font_family: font family \"\(name.trimmingCharacters(in: .whitespacesAndNewlines))\" is not installed")
+                    continue
+                }
+                config.sidebarTypography.fontFamily = family
+            default:
+                problem(at: key, "unknown key \"ui.sidebar.\(name)\"")
             }
         }
     }

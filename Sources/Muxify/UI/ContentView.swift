@@ -17,7 +17,7 @@ struct ContentView: View {
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
                 if store.sidebarVisible {
-                    SidebarView(store: store)
+                    SidebarView(store: store, typography: configStore.config.sidebarTypography)
                         .frame(width: sidebar)
                         .chrome(theme: store.theme, material: .sidebar)
                     PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }

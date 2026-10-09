@@ -45,6 +45,37 @@ at least 24 so the buttons fit. Changes apply live. Removing the setting restore
 the default; invalid values use the default and appear in the Config problems
 banner. A YAML syntax error keeps the last good Config.
 
+## Sidebar typography
+
+```yaml
+ui:
+  sidebar:
+    font_size: 12
+    font_family: system
+```
+
+These are the current defaults. `font_size` is a base size in macOS points:
+Window and Agent titles use it directly, while Session names, headings,
+metadata and numeric badges scale proportionally to preserve their existing
+hierarchy and weights. It must be a finite number greater than zero; fractional
+sizes are supported. Session rows grow to accommodate larger text.
+
+`font_family` is `system` for the native macOS system font, or an installed macOS
+font family name, such as `Helvetica`. Names are case-insensitive and surrounding
+whitespace is ignored. Use a family name, not a font-file path or an individual
+face/PostScript name. A family without an exact medium or semibold weight uses
+its closest available weight.
+
+Both options apply live to text in the Sessions and Agents sections of every
+App Window, without changing selection, expansion or visibility. Symbols,
+logos, status dots, the App Window header and Terminal fonts are unchanged.
+Configure Terminal fonts in the Ghostty config instead.
+
+Each option is independent: removing it restores its default, and an invalid
+value uses its default and appears with its line in the Config problems banner
+while valid sibling settings still apply. An unavailable family is also a
+problem and uses `system`. A YAML syntax error keeps the entire last good Config.
+
 ## Browser and keybindings
 
 The top-right header toggles the Sidebar and Browser. ⌘B toggles the current

@@ -6,11 +6,17 @@ import SwiftUI
 /// their split. With neither, the sidebar stays open but empty.
 struct SidebarView: View {
     let store: WorkspaceStore
+    var typography = SidebarTypography()
 
     /// The share of the sidebar's height the Agents section gets.
     @AppStorage("sidebarAgentsFraction") private var agentsFraction: Double = 0.35
 
     var body: some View {
+        content.environment(\.sidebarTypography, typography)
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if store.sessionsVisible && store.agentsVisible {
             GeometryReader { proxy in
                 let total = proxy.size.height
@@ -79,6 +85,7 @@ private struct SectionResizeHandle: View {
 /// The Sessions and their Windows.
 private struct SessionsSection: View {
     let store: WorkspaceStore
+    @Environment(\.sidebarTypography) private var typography
 
     /// Expanded sessions, by name (names survive tmux server restarts, ids don't).
     @State private var expanded: Set<String> = Self.loadExpanded()
@@ -123,7 +130,7 @@ private struct SessionsSection: View {
         .overlay {
             if store.windows.isEmpty {
                 Text(store.serverRunning ? "No windows" : "No tmux server")
-                    .font(.system(size: 12))
+                    .font(typography.font(for: .title))
                     .foregroundStyle(.secondary)
             }
         }
@@ -193,11 +200,12 @@ private struct SessionsSection: View {
     }
 }
 
-private struct SessionHeader: View {
+struct SessionHeader: View {
     let session: SessionGroup
     let isExpanded: Bool
     let containsSelection: Bool
     let onToggle: () -> Void
+    @Environment(\.sidebarTypography) private var typography
 
     @State private var hovering = false
 
@@ -209,7 +217,7 @@ private struct SessionHeader: View {
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
                 .frame(width: 10)
             Text(session.name)
-                .font(.system(size: 14, weight: .semibold))
+                .font(typography.font(for: .session))
                 .foregroundStyle(highlighted ? Color.accentColor : Color.primary)
                 .lineLimit(1)
             Spacer(minLength: 4)
@@ -220,7 +228,7 @@ private struct SessionHeader: View {
             }
         }
         .padding(.horizontal, 8)
-        .frame(height: 24)
+        .frame(minHeight: 24)
         .background(
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(background)
@@ -240,10 +248,11 @@ private struct SessionHeader: View {
     }
 }
 
-private struct WindowRow: View {
+struct WindowRow: View {
     let window: TmuxWindow
     let isSelected: Bool
     let tabCount: Int
+    @Environment(\.sidebarTypography) private var typography
 
     @State private var hovering = false
 
@@ -251,7 +260,7 @@ private struct WindowRow: View {
         HStack(spacing: 6) {
             Logo(name: window.logoName)
             Text(window.displayTitle)
-                .font(.system(size: 12))
+                .font(typography.font(for: .title))
                 .lineLimit(1)
                 .truncationMode(.tail)
             Spacer(minLength: 4)
@@ -263,18 +272,20 @@ private struct WindowRow: View {
             if tabCount > 0 {
                 HStack(spacing: 2) {
                     Image(systemName: "globe")
+                        .font(.system(size: 10, weight: .medium))
                     Text("\(tabCount)")
+                        .font(typography.font(for: .badge))
                 }
-                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(secondaryStyle)
                 .help("\(tabCount) browser tab(s)")
             }
             if window.paneCount > 1 {
                 HStack(spacing: 2) {
                     Image(systemName: "rectangle.split.2x1")
+                        .font(.system(size: 10, weight: .medium))
                     Text("\(window.paneCount)")
+                        .font(typography.font(for: .badge))
                 }
-                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(secondaryStyle)
             }
         }
@@ -305,18 +316,19 @@ private struct WindowRow: View {
 /// The Agents reporting their Status (ADR 0004), in tmux order.
 private struct AgentsSection: View {
     let store: WorkspaceStore
+    @Environment(\.sidebarTypography) private var typography
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("Agents")
-                .font(.system(size: 11, weight: .semibold))
+                .font(typography.font(for: .section))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
             if store.agents.isEmpty {
                 Text("No agents")
-                    .font(.system(size: 12))
+                    .font(typography.font(for: .title))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -337,8 +349,9 @@ private struct AgentsSection: View {
     }
 }
 
-private struct AgentRow: View {
+struct AgentRow: View {
     let agent: Agent
+    @Environment(\.sidebarTypography) private var typography
 
     @State private var hovering = false
 
@@ -347,11 +360,11 @@ private struct AgentRow: View {
             Logo(name: agent.kind.rawValue)
             VStack(alignment: .leading, spacing: 1) {
                 Text(agent.windowTitle)
-                    .font(.system(size: 12))
+                    .font(typography.font(for: .title))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Text(agent.location)
-                    .font(.system(size: 10.5))
+                    .font(typography.font(for: .location))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
