@@ -106,4 +106,57 @@ enum GhosttyInput {
         value |= Int32(momentum.rawValue) << 1
         return value
     }
+
+    // MARK: - Drag and drop
+
+    static let dropTypes: [NSPasteboard.PasteboardType] = [.string, .fileURL]
+
+    private static let promisedFileURL = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
+
+    /// Text a drop pastes, as Ghostty does: file paths shell-escaped, other
+    /// items as plain text, joined by spaces. Programs like Claude Code turn a
+    /// pasted image path into an attachment.
+    ///
+    /// Promised files (e.g. the screenshot thumbnail) live in a private
+    /// TemporaryItems folder only the drop target may read, not processes
+    /// under the tmux server, so they are copied into `stagingDirectory` first.
+    static func dropText(_ pasteboard: NSPasteboard, stagingDirectory: URL? = nil) -> String? {
+        let items = (pasteboard.pasteboardItems ?? []).compactMap { item -> String? in
+            if let plist = item.propertyList(forType: .fileURL),
+               var url = NSURL(pasteboardPropertyList: plist, ofType: .fileURL) as URL?,
+               url.isFileURL {
+                if let stagingDirectory, item.types.contains(promisedFileURL) {
+                    url = stage(url, in: stagingDirectory) ?? url
+                }
+                return shellEscape(url.path)
+            }
+            return item.string(forType: .string)
+        }
+        return items.isEmpty ? nil : items.joined(separator: " ")
+    }
+
+    /// Copies a file into a fresh folder under `directory`, keeping its name.
+    static func stage(_ file: URL, in directory: URL) -> URL? {
+        let folder = directory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let copy = folder.appendingPathComponent(file.lastPathComponent)
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.copyItem(at: file, to: copy)
+            return copy
+        } catch {
+            return nil
+        }
+    }
+
+    /// Backslash-escapes shell-sensitive characters (Ghostty's set).
+    static func shellEscape(_ text: String) -> String {
+        let special: Set<Character> = ["\\", " ", "(", ")", "[", "]", "{", "}", "<", ">",
+                                       "\"", "'", "`", "!", "#", "$", "&", ";", "|", "*", "?", "\t"]
+        var result = ""
+        for char in text {
+            if special.contains(char) { result.append("\\") }
+            result.append(char)
+        }
+        return result
+    }
 }

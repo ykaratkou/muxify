@@ -46,6 +46,7 @@ final class TerminalSurfaceView: NSView {
         }
         guard surface != nil else { return nil }
         updateColorScheme()
+        registerForDraggedTypes(GhosttyInput.dropTypes)
     }
 
     required init?(coder: NSCoder) { fatalError("not supported") }
@@ -438,6 +439,28 @@ final class TerminalSurfaceView: NSView {
         } else if clearIfNeeded {
             ghostty_surface_preedit(surface, nil, 0)
         }
+    }
+
+    // MARK: - Drag and drop
+
+    /// Where promised drops (screenshot thumbnails) are copied so programs in
+    /// tmux can read them.
+    private static let dropStagingDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("muxify-drops", isDirectory: true)
+
+    override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
+        guard let types = sender.draggingPasteboard.types,
+              !Set(types).isDisjoint(with: GhosttyInput.dropTypes) else { return [] }
+        return .copy
+    }
+
+    override func performDragOperation(_ sender: any NSDraggingInfo) -> Bool {
+        guard let surface,
+              let text = GhosttyInput.dropText(sender.draggingPasteboard, stagingDirectory: Self.dropStagingDirectory)
+        else { return false }
+        // Sent as a paste (bracketed when the program asks for it), like Ghostty.
+        text.withCString { ghostty_surface_text(surface, $0, UInt(text.utf8.count)) }
+        return true
     }
 
     // MARK: - Edit menu
