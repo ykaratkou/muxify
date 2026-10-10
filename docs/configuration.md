@@ -143,6 +143,10 @@ skipped, and so are folders this machine doesn't have, so one Config can serve
 several Macs. The git worktrees of these folders are listed too, after their
 repository.
 
+Discovery uses `git -C <repository> worktree list --porcelain`, not a special
+worktrees folder. Include the main repository (directly or via `depth`); its
+worktrees can live anywhere. On a Remote Environment, discovery runs there.
+
 A Session Path matches the Session started in its folder, whatever the Session
 is called. Choosing one switches to that Session, or creates it named after
 the folder (`.` becomes `_`, spaces go) or, for a worktree,
