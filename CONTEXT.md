@@ -88,10 +88,24 @@ _Avoid_: left sidebar, left panel
 The typography of text in the Sidebar's Sessions and Agents sections, independent of the Terminal's typography and the App Window header.
 _Avoid_: UI font, terminal font (when you mean Sidebar text)
 
+### Command Palette
+
+**Command Palette**:
+A named search, opened by its own keybinding, over the Sources selected in it, whose highlighted result the user acts on. Each palette opens with its own Sources selected; the others can be selected too.
+_Avoid_: switcher, launcher, finder, sessionizer
+
+**Source**:
+One kind of thing a Command Palette searches: Sessions (including Session Paths), Windows or Agents.
+_Avoid_: provider, category
+
+**Session Path**:
+A folder named in the Config, or a git worktree of one, that a Command Palette offers as a Session. Choosing it switches to the Session started in that folder, creating it if none is running.
+_Avoid_: project, project directory
+
 ### Configuration
 
 **Config**:
-The Muxify config file: settings, in YAML sections, that control how Muxify itself behaves. It never holds what is open or shown now.
+The Muxify config file on a machine: settings, in YAML sections, that control how Muxify itself behaves. An App Window uses the Config of its Active Environment's machine, or the local one when that machine has none. It never holds what is open or shown now.
 _Avoid_: settings, preferences, Muxify settings
 
 **Ghostty config**:

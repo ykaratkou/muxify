@@ -26,6 +26,8 @@ struct TmuxWindow: Identifiable, Hashable {
     var isRemote = false
     /// Connection/server ownership, so a stale UI item cannot address reused IDs.
     var sourceID = ""
+    /// The folder the Window's Session started in (`#{session_path}`).
+    var sessionPath = ""
 
     /// The pane title is what shells and TUIs set via OSC 0/2 (fish sets it to
     /// `~/w/project`), so it is the best human label. tmux defaults it to the
@@ -144,6 +146,7 @@ struct TmuxPane: Hashable {
     let agentStatus: String
     /// `@muxify_agent_unread`, which Muxify itself sets.
     let unread: Bool
+    var path = ""
 }
 
 struct TmuxSnapshot {
@@ -251,12 +254,12 @@ enum Tmux {
             "#{window_name}", "#{pane_title}", "#{pane_current_path}", "#{pane_current_command}",
             "#{window_active}", "#{window_panes}", "#{window_bell_flag}", "#{session_activity}",
             "#{\(tabsOption)}", "#{\(activeTabOption)}", "#{\(browserOpenOption)}", "#{\(openOption)}",
-            "#{\(lastWindowOption)}", "#{\(agentOption)}",
+            "#{\(lastWindowOption)}", "#{\(agentOption)}", "#{session_path}",
         ].joined(separator: s)
         let clientFormat = ["C", "#{client_tty}", "#{session_id}", "#{window_id}", "#{client_pid}", "#{client_control_mode}"].joined(separator: s)
         let paneFormat = [
             "P", "#{pane_id}", "#{window_id}", "#{pane_current_command}",
-            "#{\(agentOption)}", "#{\(agentStatusOption)}", "#{\(agentUnreadOption)}",
+            "#{\(agentOption)}", "#{\(agentStatusOption)}", "#{\(agentUnreadOption)}", "#{pane_current_path}",
         ].joined(separator: s)
 
         return [
@@ -286,7 +289,8 @@ enum Tmux {
                     sessionActivity: Int(f[12]) ?? 0,
                     agent: f[18],
                     storedBrowser: StoredBrowser(tabs: f[13], activeTab: f[14], open: f[15]),
-                    openRequests: f[16].split(separator: " ").map(String.init)
+                    openRequests: f[16].split(separator: " ").map(String.init),
+                    sessionPath: f.count > 19 ? f[19] : ""
                 ))
                 if !f[17].isEmpty { lastWindowID = f[17] }
             } else if f.first == "C", f.count >= 4 {
@@ -296,7 +300,8 @@ enum Tmux {
             } else if f.first == "P", f.count >= 7 {
                 panes.append(TmuxPane(
                     id: f[1], windowID: f[2], command: f[3],
-                    agent: f[4], agentStatus: f[5], unread: f[6] == "1"
+                    agent: f[4], agentStatus: f[5], unread: f[6] == "1",
+                    path: f.count > 7 ? f[7] : ""
                 ))
             } else if f.first == "S", f.count >= 2 {
                 serverID = f[1]

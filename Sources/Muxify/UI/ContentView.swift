@@ -17,7 +17,7 @@ struct ContentView: View {
             // between Windows with and without a Browser is instant.
             HStack(spacing: 0) {
                 if store.sidebarVisible {
-                    SidebarView(store: store, typography: configStore.config.sidebarTypography)
+                    SidebarView(store: store, typography: store.config.sidebarTypography)
                         .frame(width: sidebar)
                         .chrome(theme: store.theme, material: .sidebar)
                     PanelResizeHandle(width: sidebar, range: 180...420, edge: .leading) { sidebarWidth = $0 }
@@ -33,17 +33,16 @@ struct ContentView: View {
                 }
             }
         }
+        .overlay { CommandPaletteOverlay(palette: store.palette) }
         .overlay(alignment: .top) {
-            if !configStore.problems.isEmpty, !configStore.problemsDismissed {
-                ConfigProblemsBanner(configStore: configStore, theme: store.theme)
-            }
+            ConfigProblemsBanner(store: store, configStore: configStore)
         }
         .padding(.top, headerHeight)
         // An overlay, so it is above everything for clicks: scroll views below
         // (sidebar list, tab strip) reach up under the title bar area and would
         // otherwise swallow clicks on the toggles.
         .overlay(alignment: .top) {
-            HeaderBar(store: store, keybinds: configStore.config.keybinds, height: headerHeight)
+            HeaderBar(store: store, keybinds: store.config.keybinds, height: headerHeight)
         }
         .ignoresSafeArea()
         // Names the window for the Window menu and Mission Control.
@@ -54,7 +53,7 @@ struct ContentView: View {
         .onChange(of: configStore.config.remoteEnvironments) { _, _ in store.reconcileEnvironments() }
     }
 
-    private var headerHeight: CGFloat { CGFloat(configStore.config.headerHeight) }
+    private var headerHeight: CGFloat { CGFloat(store.config.headerHeight) }
 
     private func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
         min(max(value, low), high)
@@ -105,31 +104,49 @@ private struct HeaderBar: View {
 }
 
 /// Lists the Config values Muxify skipped, or the syntax error that keeps
-/// the last good Config, until the user closes it or the Config reloads.
+/// the last good Config, until the user closes it or the Config reloads: the
+/// local Config's, and a Remote Environment's own Config's.
 private struct ConfigProblemsBanner: View {
+    let store: WorkspaceStore
     let configStore: ConfigStore
-    let theme: TerminalTheme?
+
+    private var local: [ConfigProblem] { configStore.problemsDismissed ? [] : configStore.problems }
+    private var remote: [ConfigProblem] {
+        store.remoteProblemsDismissed ? [] : store.remoteConfig?.problems ?? []
+    }
 
     var body: some View {
+        if !local.isEmpty || !remote.isEmpty { banner(theme: store.theme) }
+    }
+
+    private func banner(theme: TerminalTheme?) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.yellow)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Problems in the Muxify Config")
                     .font(.callout.weight(.semibold))
-                ForEach(Array(configStore.problems.enumerated()), id: \.offset) { _, problem in
+                ForEach(Array((remote + local).enumerated()), id: \.offset) { _, problem in
                     Text("\((problem.path as NSString).abbreviatingWithTildeInPath):\(problem.line): \(problem.message)")
                         .font(.caption.monospaced())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
                 }
-                Button("Open Config") { configStore.openInEditor() }
-                    .buttonStyle(.link)
-                    .font(.caption)
+                HStack(spacing: 12) {
+                    if !remote.isEmpty {
+                        Button("Open \(store.environmentName) Config") { store.openConfig() }
+                    }
+                    if !local.isEmpty {
+                        Button(remote.isEmpty ? "Open Config" : "Open Local Config") { configStore.openInEditor() }
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.caption)
             }
             Spacer(minLength: 0)
             Button {
                 configStore.problemsDismissed = true
+                store.remoteProblemsDismissed = true
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))

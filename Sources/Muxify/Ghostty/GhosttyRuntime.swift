@@ -20,12 +20,23 @@ protocol GhosttyRuntimeDelegate: AnyObject {
 struct TerminalTheme: Equatable {
     let background: NSColor
     let foreground: NSColor
+    /// The theme's 16 ANSI colors, black to bright white, for accents that
+    /// follow the Ghostty theme (the Command Palette's).
+    let ansi: [NSColor]
 
     init?(config: ghostty_config_t) {
         guard let background = Self.color(config, "background"),
               let foreground = Self.color(config, "foreground") else { return nil }
         self.background = background
         self.foreground = foreground
+        var palette = ghostty_config_palette_s()
+        let key = "palette"
+        let found = key.withCString { ghostty_config_get(config, &palette, $0, UInt(key.utf8.count)) }
+        ansi = found ? withUnsafeBytes(of: palette.colors) { raw in
+            raw.bindMemory(to: ghostty_config_color_s.self).prefix(16).map {
+                NSColor(srgbRed: CGFloat($0.r) / 255, green: CGFloat($0.g) / 255, blue: CGFloat($0.b) / 255, alpha: 1)
+            }
+        } : []
     }
 
     var isDark: Bool {

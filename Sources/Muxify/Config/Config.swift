@@ -19,6 +19,12 @@ struct ConfigSyntaxError: Error, Equatable {
 /// The Config: how Muxify itself behaves, read from a YAML file.
 struct Config: Equatable {
     var keybinds = Keybinds.defaults
+    /// The keybinds of an open Command Palette (`keybindings.command_palette`).
+    var paletteKeybinds = PaletteKeybinds.defaults
+    /// In Config order (ADR 0009).
+    var commandPalettes = [CommandPaletteConfig.goTo]
+    /// Where the Session Paths come from, in Config order.
+    var sessionPaths: [SessionPathRoot] = []
     /// Height of the app's header in points; at least 24 to fit its buttons.
     var headerHeight: Double = 30
     /// Typography of the Sidebar's Sessions and Agents, not the terminal.
@@ -37,8 +43,9 @@ struct Config: Equatable {
 
     /// Reads the Config at `path`. A missing file gives the defaults. A value
     /// that cannot apply is skipped and recorded in `problems`; a syntax error
-    /// fails the whole read.
-    static func load(path: String,
+    /// fails the whole read. A Remote Environment's Config skips the sections
+    /// about the app itself (ADR 0010).
+    static func load(path: String, isRemote: Bool = false,
                      fontFamilies: @escaping () -> [String] = { SidebarTypography.fontFamilies },
                      read: (String) -> String?) -> Result<Config, ConfigSyntaxError> {
         guard let text = read(path) else { return .success(Config()) }
@@ -50,7 +57,7 @@ struct Config: Equatable {
         }
         guard let root else { return .success(Config()) }
         return withoutActuallyEscaping(read) { read in
-            var reader = ConfigReader(path: path, read: read, fontFamilies: fontFamilies)
+            var reader = ConfigReader(path: path, isRemote: isRemote, read: read, fontFamilies: fontFamilies)
             reader.readSections(root)
             return .success(reader.config)
         }
@@ -58,8 +65,10 @@ struct Config: Equatable {
 
     /// What Open Config writes into a new Config file.
     static var template: String {
-        let defaults = Keybinds.defaultSpelling.map { action, spellings in
-            "#   \(action.rawValue): \(spellings.count == 1 ? spellings[0] : "[\(spellings.joined(separator: ", "))]")"
+        func spell<Action: KeybindAction>(_ defaults: KeyValuePairs<Action, [String]>, indent: String) -> String {
+            defaults.map { action, spellings in
+                "#\(indent)\(action.rawValue): \(spellings.count == 1 ? spellings[0] : "[\(spellings.joined(separator: ", "))]")"
+            }.joined(separator: "\n")
         }
         return """
         # Muxify Config. Muxify reloads it when it changes.
@@ -80,7 +89,31 @@ struct Config: Equatable {
         #     # system, or an installed macOS font family (case-insensitive).
         #     font_family: system
         #
+        # sessions:
+        #   # Folders the Command Palette offers as Sessions. depth 0 (the
+        #   # default) is the folder itself; 1 lists its subfolders, 2 goes two
+        #   # levels deep. Hidden folders are skipped, and so are folders this
+        #   # machine doesn't have. Git worktrees of these folders are listed too.
+        #   paths:
+        #     - path: ~/projects
+        #       depth: 1
+        #     - path: ~/.dotfiles
+        #
+        # command_palettes:
+        #   # A palette opens with its sources selected: sessions (with the
+        #   # folders above), windows or agents. Cmd+1–Cmd+3 select the others
+        #   # too. Without this section there is one, Go to…, on cmd+shift+p
+        #   # with every source; [] removes it.
+        #   - name: Sessions
+        #     keybinding: cmd+p
+        #     sources: [sessions, windows]
+        #   - name: Agents
+        #     keybinding: cmd+shift+o
+        #     sources: [agents]
+        #
         # remote_environments:
+        #   # A Remote Environment's App Window uses that machine's own Config
+        #   # when it has one, without its ghostty and remote_environments.
         #   - name: Macbook Home
         #     host: macbook-home.example.ts.net
         #     username: your-user
@@ -101,7 +134,10 @@ struct Config: Equatable {
         #   # select_next_window and select_prev_window wrap within the Session
         #   # and have no keybindings until you assign them.
         #   # The defaults:
-        \(defaults.joined(separator: "\n"))
+        \(spell(ConfigAction.defaultSpelling, indent: "   "))
+        #   # While a Command Palette is open, these act instead:
+        #   command_palette:
+        \(spell(PaletteAction.defaultSpelling, indent: "     "))
 
         """
     }
@@ -143,25 +179,62 @@ private extension ConfigSyntaxError {
 /// cannot apply.
 private struct ConfigReader {
     let path: String
+    let isRemote: Bool
     let read: (String) -> String?
     let fontFamilies: () -> [String]
     var config = Config()
+
+    /// Who a trigger can be bound to anywhere in an App Window.
+    private enum Claimant: Hashable {
+        case action(ConfigAction)
+        case palette(String)
+
+        var description: String {
+            switch self {
+            case .action(let action): action.rawValue
+            case .palette(let name): "the \(name) Command Palette"
+            }
+        }
+    }
+
+    private struct Claim<Owner> {
+        let owner: Owner
+        let trigger: KeyTrigger
+        let node: Node
+    }
+
+    /// The `keybindings` actions and Command Palettes, whose triggers are
+    /// settled once every section is read.
+    private var namedActions: [ConfigAction] = []
+    private var palettes: [CommandPaletteConfig]?
+    private var claims: [Claim<Claimant>] = []
 
     static let sections: [String: (inout ConfigReader, Node) -> Void] = [
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
         "keybindings": { $0.readKeybindings($1) },
+        "command_palettes": { $0.readCommandPalettes($1) },
+        "sessions": { $0.readSessions($1) },
         "remote_environments": { $0.readRemoteEnvironments($1) },
     ]
 
+    /// About the app on this Mac, not the machine the Config is on.
+    static let appSections: Set<String> = ["ghostty", "remote_environments"]
+
     mutating func readSections(_ root: Node) {
         for (name, key, value) in entries(of: root, "the Config") {
+            if isRemote, Self.appSections.contains(name) { continue }
             guard let section = Self.sections[name] else {
                 problem(at: key, "unknown section \"\(name)\"")
                 continue
             }
             section(&self, value)
         }
+        resolveKeybindings()
+        // In file order, although conflicts are found after every section.
+        config.problems = config.problems.enumerated()
+            .sorted { ($0.element.line, $0.offset) < ($1.element.line, $1.offset) }
+            .map(\.element)
     }
 
     mutating func readGhostty(_ node: Node) {
@@ -302,57 +375,194 @@ private struct ConfigReader {
     }
 
     mutating func readKeybindings(_ node: Node) {
-        var named: [(action: ConfigAction, listed: [(trigger: KeyTrigger, node: Node)])] = []
         for (name, key, value) in entries(of: node, "keybindings") {
+            if name == "command_palette" {
+                readPaletteKeybindings(value)
+                continue
+            }
             guard let action = ConfigAction(rawValue: name) else {
                 problem(at: key, "unknown action \"\(name)\"")
                 continue
             }
-            if let listed = triggers(in: value, of: action) { named.append((action, listed)) }
+            guard let listed = triggers(in: value, of: name) else { continue }
+            namedActions.append(action)
+            claims += listed.map { Claim(owner: .action(action), trigger: $0.trigger, node: $0.node) }
         }
-        config.keybinds = overlay(named)
     }
 
-    /// The overlay rules. An action the user named has only the triggers
-    /// listed for it. An action not named keeps its defaults, minus any
-    /// trigger listed for another action. A trigger listed under two actions
-    /// stays with the first.
-    private mutating func overlay(_ named: [(action: ConfigAction, listed: [(trigger: KeyTrigger, node: Node)])]) -> Keybinds {
-        var owners: [KeyTrigger: ConfigAction] = [:]
-        var triggers: [ConfigAction: [KeyTrigger]] = [:]
-        for (action, listed) in named {
-            var kept: [KeyTrigger] = []
-            for (trigger, node) in listed {
-                switch owners[trigger] {
-                case nil:
-                    owners[trigger] = action
-                    kept.append(trigger)
-                case action?:
+    /// Only while a palette is open, so they never conflict with the others.
+    mutating func readPaletteKeybindings(_ node: Node) {
+        var named: [PaletteAction] = []
+        var claims: [Claim<PaletteAction>] = []
+        for (name, key, value) in entries(of: node, "keybindings.command_palette") {
+            guard let action = PaletteAction(rawValue: name) else {
+                problem(at: key, "unknown Command Palette action \"\(name)\"")
+                continue
+            }
+            guard let listed = triggers(in: value, of: name) else { continue }
+            named.append(action)
+            claims += listed.map { Claim(owner: action, trigger: $0.trigger, node: $0.node) }
+        }
+        let kept = resolve(claims, describe: \.rawValue)
+        config.paletteKeybinds = overlay(named: named, kept: kept, claimed: Set(kept.values.joined()))
+    }
+
+    mutating func readCommandPalettes(_ node: Node) {
+        guard let sequence = node.sequence else {
+            problem(at: node, "command_palettes: expected a list")
+            return
+        }
+        var palettes: [CommandPaletteConfig] = []
+        for item in sequence {
+            let problemCount = config.problems.count
+            var values: [String: Node] = [:]
+            for (name, key, value) in entries(of: item, "a Command Palette") {
+                guard ["name", "keybinding", "sources"].contains(name) else {
+                    problem(at: key, "unknown Command Palette key \"\(name)\"")
                     continue
-                case let owner?:
-                    problem(at: node, "\(node.string ?? "") is already bound to \(owner.rawValue)")
+                }
+                values[name] = value
+            }
+            let name = values["name"].flatMap(string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name?.isEmpty != false || name?.rangeOfCharacter(from: .controlCharacters) != nil {
+                problem(at: values["name"] ?? item, "Command Palette name: expected a nonempty string")
+            } else if let name, palettes.contains(where: { $0.name == name }) {
+                problem(at: values["name"] ?? item, "Command Palette name \"\(name)\" is already used")
+            }
+            var sources: [PaletteSource] = []
+            for value in values["sources"].map({ $0.sequence ?? [$0] }) ?? [] {
+                guard let source = string(value).flatMap(PaletteSource.init(rawValue:)) else {
+                    problem(at: value, "Command Palette sources: expected sessions, windows or agents")
+                    continue
+                }
+                if !sources.contains(source) { sources.append(source) }
+            }
+            if sources.isEmpty, config.problems.count == problemCount {
+                problem(at: values["sources"] ?? item, "Command Palette sources: expected a list of sessions, windows or agents")
+            }
+            guard config.problems.count == problemCount, let name else { continue }
+            palettes.append(CommandPaletteConfig(name: name, triggers: [], sources: sources))
+            // A bad trigger is skipped; the palette still applies.
+            if let value = values["keybinding"], value.null == nil, let listed = triggers(in: value, of: "Command Palette keybinding") {
+                claims += listed.map { Claim(owner: .palette(name), trigger: $0.trigger, node: $0.node) }
+            }
+        }
+        self.palettes = palettes
+    }
+
+    mutating func readSessions(_ node: Node) {
+        for (name, key, value) in entries(of: node, "sessions") {
+            switch name {
+            case "paths":
+                readSessionPaths(value)
+            default:
+                problem(at: key, "unknown key \"sessions.\(name)\"")
+            }
+        }
+    }
+
+    /// A folder missing on this machine is not a problem: the Config may be
+    /// shared by several Macs.
+    mutating func readSessionPaths(_ node: Node) {
+        guard let sequence = node.sequence else {
+            problem(at: node, "sessions.paths: expected a list")
+            return
+        }
+        for item in sequence {
+            let problemCount = config.problems.count
+            var values: [String: Node] = [:]
+            for (name, key, value) in entries(of: item, "a Session Path") {
+                guard ["path", "depth"].contains(name) else {
+                    problem(at: key, "unknown Session Path key \"\(name)\"")
+                    continue
+                }
+                values[name] = value
+            }
+            let path = values["path"].flatMap(string)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isValid = path.map {
+                ($0 == "~" || $0.hasPrefix("~/") || $0.hasPrefix("/")) && $0.rangeOfCharacter(from: .controlCharacters) == nil
+            } ?? false
+            if !isValid {
+                problem(at: values["path"] ?? item, "Session Path path: expected an absolute path or one starting with ~/")
+            }
+            var depth = 0
+            if let value = values["depth"], value.null == nil {
+                if value.tag == Tag(.int), let number = value.int, number >= 0 {
+                    depth = number
+                } else {
+                    problem(at: value, "Session Path depth: expected a whole number of 0 or more")
                 }
             }
-            triggers[action] = kept
+            guard config.problems.count == problemCount, let path else { continue }
+            config.sessionPaths.append(SessionPathRoot(path: path, depth: depth))
         }
-        for action in ConfigAction.allCases where triggers[action] == nil {
-            triggers[action] = Keybinds.defaults.triggers[action, default: []].filter { owners[$0] == nil }
+    }
+
+    /// The overlay rules across `keybindings` and `command_palettes`. An
+    /// action the user named has only the triggers listed for it; so does a
+    /// palette the Config defines. An action not named, and the default
+    /// palette, keep their defaults minus any trigger listed for another.
+    private mutating func resolveKeybindings() {
+        let kept = resolve(claims, describe: \.description)
+        let claimed = Set(kept.values.joined())
+        var actions: [ConfigAction: [KeyTrigger]] = [:]
+        for case let (.action(action), triggers) in kept { actions[action] = triggers }
+        config.keybinds = overlay(named: namedActions, kept: actions, claimed: claimed)
+        if let palettes {
+            config.commandPalettes = palettes.map { palette in
+                var palette = palette
+                palette.triggers = kept[.palette(palette.name)] ?? []
+                return palette
+            }
+        } else {
+            config.commandPalettes = [CommandPaletteConfig.goTo].map { palette in
+                var palette = palette
+                palette.triggers.removeAll(where: claimed.contains)
+                return palette
+            }
         }
-        return Keybinds(triggers: triggers)
+    }
+
+    /// A trigger listed twice stays with the first.
+    private mutating func resolve<Owner: Hashable>(_ claims: [Claim<Owner>], describe: (Owner) -> String) -> [Owner: [KeyTrigger]] {
+        var owners: [KeyTrigger: Owner] = [:]
+        var kept: [Owner: [KeyTrigger]] = [:]
+        for claim in claims {
+            switch owners[claim.trigger] {
+            case nil:
+                owners[claim.trigger] = claim.owner
+                kept[claim.owner, default: []].append(claim.trigger)
+            case claim.owner?:
+                continue
+            case let owner?:
+                problem(at: claim.node, "\(claim.node.string ?? "") is already bound to \(describe(owner))")
+            }
+        }
+        return kept
+    }
+
+    private func overlay<Action: KeybindAction>(named: [Action], kept: [Action: [KeyTrigger]], claimed: Set<KeyTrigger>) -> KeybindSet<Action> {
+        var triggers: [Action: [KeyTrigger]] = [:]
+        for action in Action.allCases {
+            triggers[action] = named.contains(action)
+                ? kept[action] ?? []
+                : Action.defaultTriggers[action, default: []].filter { !claimed.contains($0) }
+        }
+        return KeybindSet(triggers: triggers)
     }
 
     /// One trigger or a list of them. A bad item of a list is skipped; a bad
-    /// single value skips the action, so it keeps its defaults.
-    private mutating func triggers(in node: Node, of action: ConfigAction) -> [(trigger: KeyTrigger, node: Node)]? {
+    /// single value skips the setting, so it keeps its defaults.
+    private mutating func triggers(in node: Node, of setting: String) -> [(trigger: KeyTrigger, node: Node)]? {
         if let sequence = node.sequence {
-            return sequence.compactMap { trigger(in: $0, of: action) }
+            return sequence.compactMap { trigger(in: $0, of: setting) }
         }
-        return trigger(in: node, of: action).map { [$0] }
+        return trigger(in: node, of: setting).map { [$0] }
     }
 
-    private mutating func trigger(in node: Node, of action: ConfigAction) -> (trigger: KeyTrigger, node: Node)? {
+    private mutating func trigger(in node: Node, of setting: String) -> (trigger: KeyTrigger, node: Node)? {
         guard let spelling = string(node) else {
-            problem(at: node, "\(action.rawValue): expected a trigger or a list of triggers")
+            problem(at: node, "\(setting): expected a trigger or a list of triggers")
             return nil
         }
         do {
