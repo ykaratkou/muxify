@@ -39,6 +39,8 @@ struct Agent: Identifiable, Hashable {
     /// The Window's `displayTitle`.
     let windowTitle: String
     var sourceID = ""
+    /// The Pane's current folder.
+    var path = ""
 
     var id: String { paneID }
 
@@ -71,7 +73,8 @@ struct Agent: Identifiable, Hashable {
                 sessionName: window.sessionName,
                 windowIndex: window.index,
                 windowTitle: window.displayTitle,
-                sourceID: window.sourceID
+                sourceID: window.sourceID,
+                path: pane.path
             )
         }
         return agents.filter(\.unread)

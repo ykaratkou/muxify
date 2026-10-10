@@ -422,8 +422,9 @@ private struct StatusDot: View {
 /// or the terminal logo when there is none. On a dark theme `<name>.dark.svg`
 /// wins when there is one; black-only logos without one are drawn in the text
 /// color so they stay visible.
-private struct Logo: View {
+struct Logo: View {
     let name: String
+    var size: CGFloat = 14
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -437,12 +438,12 @@ private struct Logo: View {
                     .aspectRatio(contentMode: .fit)
             } else {
                 Image(systemName: "terminal")
-                    .font(.system(size: 11))
+                    .font(.system(size: size * 11 / 14))
                     .foregroundStyle(.secondary)
             }
         }
         .foregroundStyle(.primary)
-        .frame(width: 14, height: 14)
+        .frame(width: size, height: size)
     }
 
     private static let monochrome: Set<String> = ["pi"]

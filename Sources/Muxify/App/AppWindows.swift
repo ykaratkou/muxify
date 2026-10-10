@@ -58,6 +58,12 @@ final class AppWindows {
         return store
     }
 
+    /// Reload Config: the local Config, and each Remote Environment's own.
+    func reloadConfig() {
+        configStore.reload()
+        for store in stores.values { store.loadRemoteConfig() }
+    }
+
     func newWindow() {
         guard !isQuitting, let openWindow else { return }
         openWindow(catalog.newLocalWindow())
@@ -162,5 +168,5 @@ extension AppWindows: @preconcurrency GhosttyRuntimeDelegate {
     func ghosttyGotoTab(_ tab: Int32) { focusedStore?.ghosttyGotoTab(tab) }
     func ghosttySurfaceClosed(_ view: TerminalSurfaceView) { view.delegate?.ghosttySurfaceClosed(view) }
     func ghosttyThemeChanged(_ theme: TerminalTheme) { stores.values.forEach { $0.ghosttyThemeChanged(theme) } }
-    func ghosttyReloadConfig() { configStore.reload() }
+    func ghosttyReloadConfig() { reloadConfig() }
 }

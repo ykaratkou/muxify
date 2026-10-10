@@ -37,6 +37,25 @@ final class TmuxConnection {
         }
     }
 
+    /// Runs a /bin/sh `script` on the Environment's machine: over the SSH
+    /// master for a Remote Environment, else here. Off the tmux queue, so a
+    /// slow script never holds up tmux commands.
+    func runScriptAsync(_ script: String, arguments: [String] = [], timeout: TimeInterval = 20,
+                        completion: @escaping (Result<String, Error>) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { () throws -> String in
+                self.lock.lock()
+                let stopped = self.retired
+                self.lock.unlock()
+                guard !stopped else { throw TmuxError.cancelled }
+                let invocation = self.remote?.script(script, arguments: arguments)
+                    ?? CommandInvocation(executable: "/bin/sh", arguments: ["-c", script, "muxify"] + arguments)
+                return try self.runner.run(invocation, timeout: timeout)
+            }
+            DispatchQueue.main.async { completion(result) }
+        }
+    }
+
     func snapshot() throws -> TmuxSnapshot {
         guard let remote else {
             do { return stamped(try Tmux.readSnapshot(using: run)) }

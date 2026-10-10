@@ -6,7 +6,9 @@ import SwiftUI
     let windows: AppWindows
     private var store: WorkspaceStore? { windows.focusedStore }
     private var configStore: ConfigStore { windows.configStore }
-    private var keybinds: Keybinds { configStore.config.keybinds }
+    /// The focused App Window's, which may come from its Remote Environment.
+    private var config: Config { store?.config ?? configStore.config }
+    private var keybinds: Keybinds { config.keybinds }
     private var remoteActionDisabled: Bool {
         guard let store else { return true }
         return store.isRemote && !store.isConnected
@@ -22,6 +24,13 @@ import SwiftUI
                 .disabled(store == nil)
             Toggle("Show Agents", isOn: Binding(get: { store?.agentsVisible ?? true }, set: { store?.agentsVisible = $0 }))
                 .disabled(store == nil)
+            Divider()
+            // The Command Palettes; their keybindings act in the key monitor.
+            ForEach(config.commandPalettes) { palette in
+                Button(palette.name) { store?.palette.toggle(palette) }
+                    .keyboardShortcut(palette.triggers.first?.shortcut)
+                    .disabled(store == nil)
+            }
         }
         CommandGroup(replacing: .newItem) {
             Button("New Muxify Window") { windows.newWindow() }
@@ -62,8 +71,10 @@ import SwiftUI
                 .disabled(store == nil)
         }
         CommandGroup(after: .appSettings) {
-            Button("Open Config") { configStore.openInEditor() }
-            Button("Reload Config") { configStore.reload() }
+            Button("Open Config") {
+                if let store { store.openConfig() } else { configStore.openInEditor() }
+            }
+            Button("Reload Config") { windows.reloadConfig() }
                 .keyboardShortcut(",", modifiers: [.command, .shift])
             Button("Install Extensions") { ExtensionInstaller.run() }
                 .disabled(store?.isRemote == true)

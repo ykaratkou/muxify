@@ -85,6 +85,16 @@ final class RemoteSSH {
         ])
     }
 
+    /// Runs `script` with /bin/sh on the remote machine, over the master like
+    /// tmux commands, with `arguments` as its positional parameters.
+    func script(_ script: String, arguments: [String] = []) -> CommandInvocation {
+        let words = [Self.remotePath + "\n" + script, "muxify"] + arguments
+        return CommandInvocation(executable: sshExecutable, arguments: options + [
+            "-T", "-o", "ControlMaster=no", "-o", "BatchMode=yes", "-o", "ProxyCommand=/usr/bin/false",
+            "--", environment.host, "exec /bin/sh -c " + words.map(Tmux.shellQuote).joined(separator: " "),
+        ])
+    }
+
     func terminalCommand(target: String? = nil, createSessionIfNeeded: Bool = true) -> String {
         terminalInvocation(target: target, createSessionIfNeeded: createSessionIfNeeded).commandLine
     }

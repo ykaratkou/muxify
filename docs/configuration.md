@@ -76,6 +76,100 @@ value uses its default and appears with its line in the Config problems banner
 while valid sibling settings still apply. An unavailable family is also a
 problem and uses `system`. A YAML syntax error keeps the entire last good Config.
 
+## Command Palettes
+
+A Command Palette searches Sessions, Windows and Agents and acts on the
+highlighted result. Each palette has a name, a keybinding that works anywhere
+in Muxify, and the sources selected when it opens:
+
+```yaml
+command_palettes:
+  - name: Sessions
+    keybinding: cmd+p
+    sources: [sessions, windows]
+  - name: Agents
+    keybinding: cmd+shift+o
+    sources: [agents]
+```
+
+Without `command_palettes` there is one palette, **Go to…**, on ⇧⌘P with every
+source; `command_palettes: []` removes it. Names must be unique, and `sources`
+lists `sessions` (running Sessions and the [Session Paths](#session-paths)
+without one), `windows` or `agents`. They aren't a hard limit: every palette
+has a chip for each source, its own first and on, and ⌘1–⌘3 or a click turn
+any chip on or off. The last chip that is on stays on. A palette's `keybinding` takes one trigger
+or a list and follows the [keybindings](keybindings.md) rules: it is removed
+from other actions' defaults, and when two claim the same trigger the first in
+the file keeps it. Each palette is also in the View menu.
+
+Its own keybinding closes a palette; another palette's keybinding switches to
+that one and keeps what you typed. With nothing typed, a palette lists:
+
+- **Sessions**, most recently active first and the current one last, then the
+  Session Paths that have no Session.
+- **Agents** that need you (blocked, failed or unread), then working ones, then
+  the rest.
+- **Windows** only once you type, or when theirs is the only chip on.
+
+Typing ranks everything in one list. A Window with an Agent is left out while
+the Agents chip is on. ⎋ closes the actions menu, then clears the search and
+puts the chips back, then closes the palette. The keys inside a palette are
+[configurable](keybindings.md#command-palette-keybindings).
+
+| Action | Session | Window | Agent | Session Path |
+| --- | --- | --- | --- | --- |
+| Jump to (↩) | Switch to it | Select it | Select its Window and Pane | Create the Session there, then switch |
+| Copy Path (⌘C) | Its start folder | The active Pane's folder | The Pane's folder | The folder |
+| Copy tmux Target (⌘⇧C) | Session name | `session:index` | Pane ID | — |
+
+⌘K opens these actions in a menu by the highlighted row.
+
+## Session Paths
+
+Folders the Command Palette offers as Sessions, for those that aren't running
+yet, replacing a sessionizer script:
+
+```yaml
+sessions:
+  paths:
+    - path: ~/projects
+      depth: 1
+    - path: ~/.dotfiles
+```
+
+`path` is absolute or starts with `~/`. `depth` defaults to 0, the folder
+itself; 1 lists its subfolders, and 2 also their subfolders. Hidden folders are
+skipped, and so are folders this machine doesn't have, so one Config can serve
+several Macs. The git worktrees of these folders are listed too, after their
+repository.
+
+Discovery uses `git -C <repository> worktree list --porcelain`, not a special
+worktrees folder. Include the main repository (directly or via `depth`); its
+worktrees can live anywhere. On a Remote Environment, discovery runs there.
+
+A Session Path matches the Session started in its folder, whatever the Session
+is called. Choosing one switches to that Session, or creates it named after
+the folder (`.` becomes `_`, spaces go) or, for a worktree,
+`<project> [<worktree>]`. If another folder's Session has that name, the parent
+folder goes in front: `work-foo`. Muxify looks for the folders each time a
+palette with `sessions` opens.
+
+## A Remote Environment's own Config
+
+A Remote Environment's App Window uses the Config on that machine
+(`~/.config/muxify/config.yaml`, or under its `$XDG_CONFIG_HOME`) when there is
+one, as if Muxify ran there: its Session Paths, palettes, keybindings and `ui`.
+Its `ghostty` and `remote_environments` sections are ignored, because they
+describe this Mac's app. Without a remote Config, the local Config applies, and
+its Session Paths are looked for on the remote. The menu shows the focused App
+Window's keybindings.
+
+Muxify reads the remote file when it connects, on **Reload Config** (⌘⇧,), and
+each time a palette opens; it doesn't watch it. A syntax error keeps the last
+good remote Config, and its problems show in that App Window with the host in
+front of the path. **Open Config** there opens the remote file in the remote's
+`$VISUAL` or `$EDITOR` in a new tmux Window.
+
 ## Browser and keybindings
 
 The top-right header toggles the Sidebar and Browser. ⌘B toggles the current

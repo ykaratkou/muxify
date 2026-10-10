@@ -35,6 +35,16 @@ final class WorkspaceStore {
     /// True only after a successful inventory, never inferred from an SSH error.
     private(set) var hasNoSessions = false
     var remoteEnvironments: [RemoteEnvironment] { configStore.config.remoteEnvironments }
+    /// A Remote Environment's own Config, as last read without a syntax
+    /// error; nil when that machine has none (ADR 0010).
+    private(set) var remoteConfig: LoadedConfig?
+    var remoteProblemsDismissed = false
+    /// The Config this App Window runs with: its Remote Environment's own
+    /// when that machine has one, else the local Config.
+    var config: Config { remoteConfig?.config ?? configStore.config }
+    /// From the last look at `sessions.paths` on the Environment's machine.
+    private(set) var sessionPaths: [SessionPath] = []
+    let palette = CommandPalette()
     var isRemote: Bool { activeEnvironment != nil }
     var environmentName: String { activeEnvironment?.name ?? "Local" }
     /// The Ghostty theme's colors; the header and sidebar follow them.
@@ -105,7 +115,9 @@ final class WorkspaceStore {
     @ObservationIgnored private var attachmentTarget: Target?
     @ObservationIgnored private var createSessionIfNeeded = true
     @ObservationIgnored private var serverID: String?
-    @ObservationIgnored private var homeDirectory = NSHomeDirectory()
+    @ObservationIgnored private(set) var homeDirectory = NSHomeDirectory()
+    /// Where the Remote Environment's Config is, or would be.
+    @ObservationIgnored private var remoteConfigPath: String?
     @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private let connectionCleanup = ConnectionCleanup()
     @ObservationIgnored var onSelectEnvironment: ((String?) -> Void)?
@@ -115,6 +127,7 @@ final class WorkspaceStore {
     init(configStore: ConfigStore, environment: RemoteEnvironment? = nil) {
         self.configStore = configStore
         activeEnvironment = environment
+        palette.store = self
         // Browser state used to be kept here, keyed by window id; it now lives
         // on the tmux Windows (ADR 0003).
         UserDefaults.standard.removeObject(forKey: "browserURLs")
@@ -159,6 +172,11 @@ final class WorkspaceStore {
     /// open or focus another App Window through the app coordinator.
     private func transition(to next: RemoteEnvironment?, target: Target? = nil, createSessionIfNeeded: Bool = true) {
         guard !isShuttingDown else { return }
+        if next != activeEnvironment {
+            remoteConfig = nil
+            remoteConfigPath = nil
+            sessionPaths = []
+        }
         activeEnvironment = next
         attachmentTarget = target
         self.createSessionIfNeeded = createSessionIfNeeded
@@ -307,9 +325,11 @@ final class WorkspaceStore {
                 switch result {
                 case .success(let snapshot):
                     if self.isRemote {
+                        let connecting = !self.isConnected
                         self.clientTTY = snapshot.ownClientTTY
                         self.homeDirectory = snapshot.homeDirectory ?? self.homeDirectory
                         self.isConnected = true
+                        if connecting { self.loadRemoteConfig() }
                         self.environmentStatus = "Connected to \(self.environmentName)"
                         self.reconnectAttempt = 0
                         self.terminalMessage = nil
@@ -614,9 +634,25 @@ final class WorkspaceStore {
 
     func newSession() {
         let cwd = selectedWindow?.path ?? homeDirectory
-        var args = ["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-c", cwd]
         let name = (cwd as NSString).lastPathComponent.replacingOccurrences(of: ".", with: "_")
-        if !name.isEmpty, !windows.contains(where: { $0.sessionName == name }) { args += ["-s", name] }
+        createSession(in: cwd, name: !name.isEmpty && !windows.contains(where: { $0.sessionName == name }) ? name : nil)
+    }
+
+    /// Switches to the Session started in the Session Path's folder, creating
+    /// it there first when none is running.
+    func open(_ path: SessionPath) {
+        let sessions = windows.filter { SessionPaths.matches(path, sessionFolder: $0.sessionPath) }
+        if let window = sessions.first(where: \.isActive) ?? sessions.first {
+            select(window)
+            return
+        }
+        createSession(in: path.path, name: SessionPaths.newSessionName(for: path, taken: Set(windows.map(\.sessionName))))
+    }
+
+    /// Without a name, tmux picks one.
+    private func createSession(in cwd: String, name: String?) {
+        var args = ["new-session", "-d", "-P", "-F", "#{session_id}:#{window_id}", "-c", cwd]
+        if let name { args += ["-s", name] }
         runAsync(args) { [weak self] result in
             guard let self, case .success(let output) = result else { return }
             let ids = output.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map(String.init)
@@ -646,6 +682,97 @@ final class WorkspaceStore {
             let ids = output.split(separator: " ").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             guard ids.count == 2 else { return }
             self?.runAsync(makeArgs(ids[0], ids[1])) { _ in self?.refresh() }
+        }
+    }
+
+    // MARK: - Config and Command Palettes
+
+    /// Reads the Remote Environment's own Config (ADR 0010): on connecting,
+    /// on Reload Config and when a Command Palette opens. Not watched.
+    func loadRemoteConfig(then completion: (() -> Void)? = nil) {
+        guard let environment = activeEnvironment, let connection, isConnected else {
+            completion?()
+            return
+        }
+        let current = generation
+        connection.runScriptAsync(RemoteConfigFile.script) { [weak self] result in
+            guard let self, self.generation == current else { return }
+            defer { completion?() }
+            // A failed read keeps what this App Window has.
+            guard case .success(let output) = result, let file = RemoteConfigFile.parse(output) else { return }
+            self.remoteConfigPath = file.path
+            guard let text = file.text else {
+                if self.remoteConfig != nil { self.remoteConfig = nil }
+                return
+            }
+            let shown = "\(environment.host):\(Paths.tildify(file.path, home: self.homeDirectory))"
+            var loaded = self.remoteConfig ?? LoadedConfig()
+            loaded.update(with: Config.load(path: shown, isRemote: true) { $0 == shown ? text : nil })
+            if loaded != self.remoteConfig {
+                for problem in loaded.problems { NSLog("muxify: config: \(problem)") }
+                self.remoteConfig = loaded
+                self.remoteProblemsDismissed = false
+            }
+        }
+    }
+
+    /// Reloads the local Config with Reload Config, then this App Window's
+    /// remote one.
+    func reloadConfig() {
+        configStore.reload()
+        loadRemoteConfig()
+    }
+
+    /// A Remote Environment's Config is read again whenever a palette opens,
+    /// and the Session Paths are looked for again (the last ones show meanwhile).
+    func paletteDidOpen(_ palette: CommandPaletteConfig) {
+        let scan = { [weak self] in
+            guard let self, palette.sources.contains(.sessions), let connection = self.connection else { return }
+            let roots = self.config.sessionPaths
+            guard !roots.isEmpty else {
+                self.sessionPaths = []
+                return
+            }
+            let current = self.generation
+            connection.runScriptAsync(SessionPaths.script, arguments: SessionPaths.arguments(for: roots)) { [weak self] result in
+                guard let self, self.generation == current else { return }
+                guard case .success(let output) = result else {
+                    if case .failure(let error) = result { NSLog("muxify: Session Paths: \(error)") }
+                    return
+                }
+                let paths = SessionPaths.parse(output)
+                if paths != self.sessionPaths { self.sessionPaths = paths }
+            }
+        }
+        if isRemote { loadRemoteConfig(then: scan) } else { scan() }
+    }
+
+    /// Opens the Config this App Window uses. A Remote Environment's own
+    /// Config opens in that machine's editor, in a new tmux Window.
+    func openConfig() {
+        guard isRemote else {
+            configStore.openInEditor()
+            return
+        }
+        guard isConnected else { return }
+        guard remoteConfig != nil, let path = remoteConfigPath else {
+            let file = remoteConfigPath.map { Paths.tildify($0, home: homeDirectory) } ?? "~/.config/muxify/config.yaml"
+            let alert = NSAlert()
+            alert.messageText = "\(environmentName) has no Muxify Config"
+            alert.informativeText = "This App Window uses your local Config. To give \(environmentName) its own, create \(file) there."
+            alert.addButton(withTitle: "Open Local Config")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn { configStore.openInEditor() }
+            return
+        }
+        guard let sessionID = selectedWindow?.sessionID ?? windows.first?.sessionID else { return }
+        // Run by tmux's default shell, which may be fish: plain words only.
+        let editor = "sh -c " + Tmux.shellQuote("exec \"${VISUAL:-${EDITOR:-vi}}\" \"$1\"") + " sh " + Tmux.shellQuote(path)
+        let args = ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", "\(sessionID):", "-c", homeDirectory, editor]
+        runAsync(args) { [weak self] result in
+            guard let self, case .success(let output) = result else { return }
+            let windowID = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            self.switchClient(to: Target(sessionID: sessionID, windowID: windowID, path: nil))
         }
     }
 
@@ -796,7 +923,13 @@ final class WorkspaceStore {
     func handleKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard !isShuttingDown, let window = terminalHost.window, event.window === window else { return event }
         if let trigger = KeyTrigger(event) {
-            let keybinds = configStore.config.keybinds
+            if palette.handle(trigger, in: event) { return nil }
+            let config = self.config
+            if let target = config.commandPalettes.first(where: { $0.triggers.contains(trigger) }) {
+                palette.toggle(target)
+                return nil
+            }
+            let keybinds = config.keybinds
             if let action = keybinds.action(for: trigger) {
                 perform(action)
                 return nil
@@ -865,7 +998,7 @@ extension WorkspaceStore: @preconcurrency GhosttyRuntimeDelegate {
     }
 
     func ghosttyReloadConfig() {
-        configStore.reload()
+        reloadConfig()
     }
 
     func ghosttyNewTab() { newWindow() }

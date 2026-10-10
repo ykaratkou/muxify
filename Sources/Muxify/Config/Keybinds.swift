@@ -1,5 +1,18 @@
-/// What a Muxify keybind can do.
-enum ConfigAction: String, CaseIterable {
+/// What a keybinding can do, with its default triggers.
+protocol KeybindAction: CaseIterable, Hashable, RawRepresentable where RawValue == String {
+    /// The defaults as the user spells them, so the template can show them.
+    static var defaultSpelling: KeyValuePairs<Self, [String]> { get }
+    static var defaultTriggers: [Self: [KeyTrigger]] { get }
+}
+
+extension KeybindAction {
+    static func parse(_ spelling: KeyValuePairs<Self, [String]>) -> [Self: [KeyTrigger]] {
+        Dictionary(uniqueKeysWithValues: spelling.map { action, spellings in (action, spellings.map { try! KeyTrigger($0) }) })
+    }
+}
+
+/// What a Muxify keybind can do, anywhere in an App Window.
+enum ConfigAction: String, KeybindAction {
     case newAppWindow = "new_app_window"
     case toggleSidebar = "toggle_sidebar"
     case toggleBrowser = "toggle_browser"
@@ -15,14 +28,7 @@ enum ConfigAction: String, CaseIterable {
     case selectWindow9 = "select_window_9"
     case selectNextWindow = "select_next_window"
     case selectPrevWindow = "select_prev_window"
-}
 
-/// Muxify's keybinds: each action's triggers, in the order they were listed.
-/// No trigger belongs to two actions.
-struct Keybinds: Equatable {
-    let triggers: [ConfigAction: [KeyTrigger]]
-
-    /// The defaults as the user spells them, so the template can show them.
     static let defaultSpelling: KeyValuePairs<ConfigAction, [String]> = [
         .newAppWindow: ["cmd+n"],
         .toggleSidebar: ["cmd+s", "ctrl+cmd+s"],
@@ -41,19 +47,54 @@ struct Keybinds: Equatable {
         .selectPrevWindow: [],
     ]
 
-    static let defaults = Keybinds(triggers: Dictionary(uniqueKeysWithValues: defaultSpelling.map { action, spellings in
-        (action, spellings.map { try! KeyTrigger($0) })
-    }))
+    static let defaultTriggers = parse(defaultSpelling)
+}
 
-    func action(for trigger: KeyTrigger) -> ConfigAction? {
+/// What a keybind does while a Command Palette is open, from
+/// `keybindings.command_palette`. These win over the other keybinds then.
+enum PaletteAction: String, KeybindAction {
+    case jumpTo = "jump_to"
+    case selectNext = "select_next"
+    case selectPrev = "select_prev"
+    case showActions = "show_actions"
+    case copyPath = "copy_path"
+    case copyTarget = "copy_target"
+
+    static let defaultSpelling: KeyValuePairs<PaletteAction, [String]> = [
+        .jumpTo: ["enter"],
+        .selectNext: ["down", "ctrl+j"],
+        .selectPrev: ["up", "ctrl+k"],
+        .showActions: ["cmd+k"],
+        .copyPath: ["cmd+c"],
+        .copyTarget: ["cmd+shift+c"],
+    ]
+
+    static let defaultTriggers = parse(defaultSpelling)
+}
+
+/// Each action's triggers, in the order they were listed. No trigger belongs
+/// to two actions.
+struct KeybindSet<Action: KeybindAction>: Equatable {
+    let triggers: [Action: [KeyTrigger]]
+
+    static var defaults: Self { Self(triggers: Action.defaultTriggers) }
+
+    func action(for trigger: KeyTrigger) -> Action? {
         triggers.first { $0.value.contains(trigger) }?.key
     }
 
     /// The trigger menus and tooltips show for `action`.
-    func firstTrigger(for action: ConfigAction) -> KeyTrigger? {
+    func firstTrigger(for action: Action) -> KeyTrigger? {
         triggers[action]?.first
     }
+}
 
+/// Muxify's keybinds that work throughout an App Window.
+typealias Keybinds = KeybindSet<ConfigAction>
+/// The keybinds of an open Command Palette.
+typealias PaletteKeybinds = KeybindSet<PaletteAction>
+
+extension KeybindSet where Action == ConfigAction {
     /// Remapping/disabling New App Window must also remove Ghostty's fallback
     /// Cmd+N behavior, rather than leaving a second shortcut in the terminal.
     func suppressesDefaultAppWindowShortcut(_ trigger: KeyTrigger) -> Bool {

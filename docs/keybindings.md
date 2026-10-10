@@ -74,6 +74,34 @@ for macOS App Window switching. Use `focus_terminal: []` to disable it, or
 `focus_terminal: cmd+backquote` to restore the old shortcut at the cost of native
 App Window switching.
 
+## Command Palette keybindings
+
+A [Command Palette](configuration.md#command-palettes)'s own `keybinding` is
+set on the palette and follows the rules above. While a palette is open, these
+actions win over every other keybinding. They are configured under
+`keybindings.command_palette`, with the same rules among themselves, and never
+conflict with the actions above:
+
+| Action | Default shortcuts | What it does |
+| --- | --- | --- |
+| `jump_to` | Enter | Jump to the highlighted result, or run the highlighted action |
+| `select_next` | Down, ⌃J | Highlight the next result or action |
+| `select_prev` | Up, ⌃K | Highlight the previous result or action |
+| `show_actions` | ⌘K | Show or hide the actions menu |
+| `copy_path` | ⌘C | Copy the result's folder |
+| `copy_target` | ⌘⇧C | Copy the result's tmux target or Pane ID |
+
+```yaml
+keybindings:
+  command_palette:
+    jump_to: enter
+    select_next: [down, ctrl+j, ctrl+n]
+    copy_target: []
+```
+
+⎋ and ⌘1–⌘3 (the source chips) are not configurable. With no results, ⌘C
+copies the search text.
+
 ## Built-in shortcuts
 
 These shortcuts are not configurable as actions in Muxify's `keybindings`
