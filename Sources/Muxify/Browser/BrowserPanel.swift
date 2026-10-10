@@ -168,6 +168,7 @@ private struct TabContent: View {
             Menu {
                 Button("Open in Default Browser", action: tab.openInDefaultBrowser).disabled(!tab.hasPage)
                 Button("Copy URL", action: tab.copyURL).disabled(!tab.hasPage)
+                Button("Show Developer Tools", action: tab.showDeveloperTools).disabled(!tab.hasPage)
                 Divider()
                 Button("Close Tab") { browser.close(tab) }
                 Button("Hide Browser") { browser.setOpen(false) }
@@ -297,8 +298,8 @@ private struct TabContent: View {
     }
 }
 
-/// Hosts a Tab's long-lived WKWebView. The web view is re-parented rather
-/// than recreated, so pages survive switching Tabs and Windows.
+/// Hosts a Tab's long-lived page and any docked inspector. Their shared parent
+/// is re-parented rather than recreated, so both survive switching Tabs and Windows.
 private struct WebViewHost: NSViewRepresentable {
     let tab: BrowserTab
 
@@ -313,11 +314,11 @@ private struct WebViewHost: NSViewRepresentable {
     }
 
     private func attach(to container: NSView) {
-        let webView = tab.webView
-        guard webView.superview !== container else { return }
-        webView.removeFromSuperview()
-        webView.frame = container.bounds
-        webView.autoresizingMask = [.width, .height]
-        container.addSubview(webView)
+        let pageView = tab.pageView
+        guard pageView.superview !== container else { return }
+        pageView.removeFromSuperview()
+        pageView.frame = container.bounds
+        pageView.autoresizingMask = [.width, .height]
+        container.addSubview(pageView)
     }
 }

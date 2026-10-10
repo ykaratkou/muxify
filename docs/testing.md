@@ -42,5 +42,8 @@ the browser-script race and input tests (no npm dependencies).
 
 Set `MUXIFY_TEST_WEBKIT=1` when running `swift test` to include the
 embedded-browser integration test; it requires a graphical macOS login.
+Set `TEST_RUNNER_MUXIFY_TEST_WEBKIT=1` when running desktop tests to also check
+the real Developer Tools frontend, page-state preservation, docking across Tab
+host changes and inspector cleanup. This test opens disposable native windows.
 The opt-in [live Simulator test](../Tests/SimulatorSmoke/README.md) uses
 disposable Devices to validate real browser rendering, shared control and input.

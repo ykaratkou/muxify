@@ -68,6 +68,9 @@ import SwiftUI
             Button("Copy URL") { store?.browserCommand { $0.activeTab?.copyURL() } }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(store?.currentBrowser?.activeTab?.hasPage != true)
+            Button("Show Developer Tools") { store?.browserCommand { $0.activeTab?.showDeveloperTools() } }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+                .disabled(store?.isBrowserVisible != true || store?.currentBrowser?.activeTab?.hasPage != true)
             Divider()
             Button("Focus Terminal") { store?.focusTerminal() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .focusTerminal)?.shortcut)

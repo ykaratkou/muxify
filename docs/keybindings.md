@@ -127,12 +127,20 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘] | Go forward |
 | ⌘R | Reload the page, or stop it while loading |
 | ⌘⇧C | Copy the active Browser Tab's current URL and show a “Copied URL” confirmation |
+| ⌘⌥I | Open or focus Developer Tools for the active Browser Tab |
 | Enter (address bar) | Navigate to the entered URL or search |
 | Escape (address bar) | Restore the current URL and focus the page |
 
 The ⌃Tab shortcuts also require the Browser to be open. ⌘W never closes the
 Muxify app window; when the terminal has focus, it does nothing unless you
 assign it to a configurable action.
+
+Developer Tools are also available from **Browser → Show Developer Tools**,
+the Browser's **⋯** menu, or **Inspect Element** in a page's right-click menu.
+They inspect the existing Tab, with its current cookies, DOM and JavaScript
+state, and close when that Tab closes. Opening the in-app WebKit inspector is
+best-effort because it uses runtime-checked private APIs; if unavailable, inspect
+Muxify's Tab from Safari's Develop menu instead.
 
 Other terminal keybindings come from your Ghostty config and tmux bindings,
 not the Muxify Config.

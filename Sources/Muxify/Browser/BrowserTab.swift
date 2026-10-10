@@ -33,6 +33,7 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored var onCopyURL: ((String) -> Void)?
 
     @ObservationIgnored private var loadedWebView: WKWebView?
+    @ObservationIgnored private var loadedPageView: NSView?
     @ObservationIgnored private var pendingURL: URL?
     @ObservationIgnored private var observations: [NSKeyValueObservation] = []
 
@@ -43,6 +44,7 @@ final class BrowserTab: NSObject, Identifiable {
         // Without a Safari token some sites serve degraded "unsupported browser" pages.
         config.applicationNameForUserAgent = "Version/26.0 Safari/605.1.15"
         config.preferences.isElementFullscreenEnabled = true
+        BrowserDeveloperTools.enable(in: config.preferences)
         return config
     }()
 
@@ -69,10 +71,26 @@ final class BrowserTab: NSObject, Identifiable {
         return webView
     }
 
+    /// WebKit docks its inspector as a sibling of the page. Keep their parent
+    /// alive with the Tab, so switching Tabs or Windows moves both together.
+    var pageView: NSView {
+        if let loadedPageView { return loadedPageView }
+        let container = NSView()
+        let webView = webView
+        webView.frame = container.bounds
+        webView.autoresizingMask = [.width, .height]
+        container.addSubview(webView)
+        loadedPageView = container
+        return container
+    }
+
     /// Stops the page and releases its web content.
     func close() {
+        if let loadedWebView { BrowserDeveloperTools.close(for: loadedWebView) }
         loadedWebView?.stopLoading()
         loadedWebView?.removeFromSuperview()
+        loadedPageView?.removeFromSuperview()
+        loadedPageView = nil
         loadedWebView = nil
         observations = []
     }
@@ -158,6 +176,22 @@ final class BrowserTab: NSObject, Identifiable {
     func openInDefaultBrowser() {
         guard let url = URL(string: urlString), hasPage else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    /// Opens (or focuses) this Tab's inspector without loading a second page.
+    func showDeveloperTools() {
+        guard hasPage else { return }
+        let webView = webView
+        guard BrowserDeveloperTools.enable(in: webView.configuration.preferences),
+              BrowserDeveloperTools.show(for: webView) else {
+            let alert = NSAlert()
+            alert.messageText = "Developer Tools Unavailable"
+            alert.informativeText = "This version of WebKit does not support opening Developer Tools in Muxify. You can inspect this Tab from Safari’s Develop menu instead."
+            alert.alertStyle = .warning
+            if let window = webView.window { alert.beginSheetModal(for: window) }
+            else { alert.runModal() }
+            return
+        }
     }
 
     func copyURL() {
