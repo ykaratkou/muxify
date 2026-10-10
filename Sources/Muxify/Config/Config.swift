@@ -209,6 +209,13 @@ private struct ConfigReader {
     private var palettes: [CommandPaletteConfig]?
     private var claims: [Claim<Claimant>] = []
 
+    init(path: String, isRemote: Bool, read: @escaping (String) -> String?, fontFamilies: @escaping () -> [String]) {
+        self.path = path
+        self.isRemote = isRemote
+        self.read = read
+        self.fontFamilies = fontFamilies
+    }
+
     static let sections: [String: (inout ConfigReader, Node) -> Void] = [
         "ghostty": { $0.readGhostty($1) },
         "ui": { $0.readUI($1) },
