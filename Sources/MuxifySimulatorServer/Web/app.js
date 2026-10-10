@@ -13,6 +13,7 @@ let shownRotation = 0;
 let hasFrame = false;
 let selectionEpoch = 0;
 let selectionPending = false;
+let stopPending = false;
 let deviceList = '';
 let desiredDevice = sessionStorage.getItem('muxify-device') || '';
 
@@ -43,6 +44,13 @@ function release() {
   pointer = null;
 }
 
+function stopFeedback(stopping) {
+  el('stop').classList.toggle('stopping', stopping);
+  el('stop').setAttribute('aria-busy', String(stopping));
+  el('stop').setAttribute('aria-label', stopping ? 'Stopping Device' : 'Stop Device');
+  el('stop-label').textContent = stopping ? 'Stopping…' : 'Stop';
+}
+
 function fit() {
   if (!hasFrame) return;
   const padding = parseFloat(getComputedStyle(stage).paddingLeft) * 2;
@@ -64,19 +72,22 @@ function fit() {
 
 new ResizeObserver(fit).observe(stage);
 
-function render(next) {
+function render(next, fromServer = true) {
   const changed = state?.selected !== next.selected;
+  if (fromServer && (changed || ['stopped', 'unavailable', 'choosing'].includes(next.status))) stopPending = false;
+  const status = stopPending ? 'stopping' : next.status;
   if (state && (changed || state.rotation !== next.rotation || state.inputEpoch !== next.inputEpoch
       || (state.status === 'running' && next.status !== 'running'))) release();
   if (changed) selectionEpoch++;
-  if (changed || !['running', 'rotating', 'connecting'].includes(next.status)) clearScreen();
+  if (changed || !['running', 'rotating', 'connecting'].includes(status)) clearScreen();
   state = next;
 
   const list = JSON.stringify(next.devices);
   if (list !== deviceList) {
     const options = [new Option('Choose a Device', '')];
     for (const device of next.devices) {
-      options.push(new Option(`${device.name} · ${device.runtimeName}`, device.udid));
+      const indicator = device.state === 'booted' ? ' · ▶ Running' : '';
+      options.push(new Option(`${device.name} · ${device.runtimeName}${indicator}`, device.udid));
     }
     devices.replaceChildren(...options);
     deviceList = list;
@@ -89,8 +100,8 @@ function render(next) {
   if ((next.selected || '') === desiredDevice) selectionPending = false;
   devices.value = selectionPending ? desiredDevice : next.selected || '';
 
-  const busy = selectionPending || ['connecting', 'stopping', 'rotating'].includes(next.status);
-  const running = ['running', 'rotating', 'connecting', 'stopping'].includes(next.status)
+  const busy = selectionPending || ['connecting', 'stopping', 'rotating'].includes(status);
+  const running = ['running', 'rotating', 'connecting', 'stopping'].includes(status)
     || ['booted', 'booting'].includes(selected?.state);
   frameElement.classList.toggle('ipad', !!selected?.deviceTypeIdentifier.includes('iPad'));
   frameElement.classList.toggle('iphone', !selected?.deviceTypeIdentifier.includes('iPad'));
@@ -98,9 +109,10 @@ function render(next) {
   el('start').disabled = busy || selected?.state !== 'shutdown';
   el('start').hidden = !!selected && running;
   el('stop').hidden = !selected || !running;
-  el('stop').disabled = selectionPending || next.status === 'stopping' || !selected
-    || (!['booted', 'booting'].includes(selected.state) && !['running', 'rotating'].includes(next.status));
-  for (const id of ['home', 'rotate']) el(id).disabled = selectionPending || next.status !== 'running';
+  el('stop').disabled = selectionPending || status === 'stopping' || !selected
+    || (!['booted', 'booting'].includes(selected.state) && !['running', 'rotating'].includes(status));
+  stopFeedback(status === 'stopping');
+  for (const id of ['home', 'rotate']) el(id).disabled = selectionPending || status !== 'running';
   el('retry').disabled = busy;
 
   const labels = {
@@ -111,10 +123,11 @@ function render(next) {
     choosing: 'Select an iPhone or iPad above. It only starts when you choose Start Device.',
     stopped: 'Choose Start Device to boot it.', unavailable: 'Use the refresh button to retry.',
   };
-  el('placeholder').textContent = labels[next.status] || 'Waiting for display…';
-  el('empty-detail').textContent = descriptions[next.status] || 'Your display will appear here shortly.';
+  el('placeholder').textContent = labels[status] || 'Waiting for display…';
+  el('empty-detail').textContent = status === 'stopping' ? 'Please wait while the Device shuts down.'
+    : descriptions[status] || 'Your display will appear here shortly.';
   const direction = { 0: 'Portrait', 90: 'Landscape', 180: 'Upside down', 270: 'Landscape' }[next.rotation];
-  const statusLabel = next.status === 'running' ? direction : next.status.charAt(0).toUpperCase() + next.status.slice(1);
+  const statusLabel = status === 'running' ? direction : status.charAt(0).toUpperCase() + status.slice(1);
   el('device-detail').textContent = selected ? `${selected.runtimeName} · ${statusLabel}` : 'No Device selected';
   el('viewers').hidden = !selected || !next.viewers;
   el('viewers').textContent = `${next.viewers} ${next.viewers === 1 ? 'viewer' : 'viewers'} · Shared control`;
@@ -137,7 +150,7 @@ async function receiveFrame(socket, data) {
     try {
       image.src = url;
       await image.decode();
-      if (ws !== socket || selectionPending || epoch !== selectionEpoch || state?.selected !== selected
+      if (ws !== socket || selectionPending || stopPending || epoch !== selectionEpoch || state?.selected !== selected
           || !['running', 'rotating'].includes(state?.status) || rotation !== state.rotation) return;
       // Validate before touching the visible canvas; a stale decode must not overwrite it.
       canvas.width = image.naturalWidth;
@@ -159,6 +172,8 @@ async function receiveFrame(socket, data) {
 
 function connect() {
   clearTimeout(retryTimer);
+  stopPending = false;
+  stopFeedback(false);
   if (!token) {
     note('Open the full URL printed by muxify simulator serve, including its access token.', true);
     el('connection').textContent = 'Access token required';
@@ -186,16 +201,23 @@ function connect() {
     if (typeof data !== 'string') return receiveFrame(socket, data);
     const message = JSON.parse(data);
     if (message.type === 'state') render(message);
-    else if (message.type === 'error') note(message.message, true);
+    else if (message.type === 'error') {
+      stopPending = false;
+      if (state) render(state, false);
+      note(message.message, true);
+    }
   };
   socket.onclose = () => {
     if (ws !== socket) return;
     heldKeys.clear();
     pointer = null;
+    stopPending = false;
+    stopFeedback(false);
     state = undefined;
     clearScreen();
     devices.disabled = true;
     for (const id of ['start', 'stop', 'home', 'rotate']) el(id).disabled = true;
+    el('retry').disabled = false;
     el('connection').textContent = 'Disconnected';
     el('connection-dot').classList.remove('online');
     note('Connection lost. Devices are still running. Reconnecting…', true);
@@ -207,6 +229,7 @@ function connect() {
 }
 
 devices.onchange = () => {
+  if (devices.disabled) return;
   release();
   clearScreen();
   selectionEpoch++;
@@ -216,10 +239,22 @@ devices.onchange = () => {
   for (const id of ['start', 'stop', 'home', 'rotate']) el(id).disabled = true;
   send({ type: 'select', device: desiredDevice || null });
 };
-for (const type of ['start', 'stop', 'home', 'rotate']) {
-  el(type).onclick = () => { release(); send({ type }); };
+for (const type of ['start', 'home', 'rotate']) {
+  el(type).onclick = () => {
+    if (el(type).disabled) return;
+    release();
+    send({ type });
+  };
 }
+el('stop').onclick = () => {
+  if (el('stop').disabled || !state || ws?.readyState !== WebSocket.OPEN) return;
+  release();
+  stopPending = true;
+  render(state, false);
+  send({ type: 'stop' });
+};
 el('retry').onclick = () => {
+  if (el('retry').disabled) return;
   if (ws?.readyState === WebSocket.OPEN) send({ type: 'refresh' });
   else connect();
 };
@@ -231,7 +266,7 @@ function touch(phase, event) {
   send({ type: 'touch', phase, x, y, rotation: shownRotation });
 }
 canvas.onpointerdown = event => {
-  if (selectionPending || state?.status !== 'running' || pointer !== null || event.button !== 0) return;
+  if (selectionPending || stopPending || state?.status !== 'running' || pointer !== null || event.button !== 0) return;
   event.preventDefault();
   canvas.focus();
   canvas.setPointerCapture(event.pointerId);
@@ -287,7 +322,7 @@ function syncModifiers(event) {
   }
 }
 canvas.onkeydown = event => {
-  if (selectionPending || state?.status !== 'running') return;
+  if (selectionPending || stopPending || state?.status !== 'running') return;
   const usage = usages[event.code];
   if (!usage) return;
   event.preventDefault();
@@ -305,7 +340,7 @@ canvas.onkeyup = event => {
   if (heldKeys.delete(usage)) send({ type: 'key', phase: 'up', usage });
   // macOS may omit non-modifier keyup events while Command is held.
   if ((usage === 0xe3 || usage === 0xe7) && !event.metaKey) release();
-  if (!selectionPending && state?.status === 'running') syncModifiers(event);
+  if (!selectionPending && !stopPending && state?.status === 'running') syncModifiers(event);
 };
 canvas.onblur = release;
 window.addEventListener('blur', release);

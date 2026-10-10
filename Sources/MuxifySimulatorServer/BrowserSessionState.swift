@@ -54,10 +54,14 @@ actor BrowserSessionState {
                 try await publish(status: .connecting)
                 try await device.attach(id, start: true)
                 try await refresh()
-            case .stop, .home, .rotate, .touch, .key, .release:
+            case .stop:
+                guard let device else { return }
+                try await publish(status: .stopping)
+                try await device.control(command, owner: id)
+                try await refresh()
+            case .home, .rotate, .touch, .key, .release:
                 try await device?.control(command, owner: id)
                 switch command {
-                case .stop: try await refresh()
                 case .home, .rotate: try await synchronize()
                 default: break
                 }

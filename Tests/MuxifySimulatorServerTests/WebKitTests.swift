@@ -47,6 +47,47 @@ final class WebKitTests: XCTestCase {
     }
 
     @MainActor
+    func testStopFeedbackRendersImmediatelyAndUnlocksAfterShutdown() async throws {
+        guard ProcessInfo.processInfo.environment["MUXIFY_TEST_WEBKIT"] == "1" else {
+            throw XCTSkip("Opt in with MUXIFY_TEST_WEBKIT=1; requires a graphical macOS login.")
+        }
+        _ = NSApplication.shared
+        var options = try ServerOptions(arguments: ["serve"]); options.port = 0
+        let backend = MockBackend(state: .booted), server = SimulatorServer(options: options, backend: backend)
+        let port = try await server.start()
+        let view = WKWebView(frame: NSRect(x: 0, y: 0, width: 320, height: 640))
+        view.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/#token=\(options.token)")!))
+        do {
+            try await wait(view, "document.getElementById('devices')?.options.length === 3")
+            _ = try await view.evaluateJavaScript("const menu=document.getElementById('devices'); menu.value='\(deviceA)'; menu.dispatchEvent(new Event('change'));")
+            try await wait(view, "!document.getElementById('stop').disabled")
+            let feedback = try await view.evaluateJavaScript("""
+                (() => {
+                  const stop = document.getElementById('stop');
+                  stop.click();
+                  return stop.disabled && stop.getAttribute('aria-busy') === 'true'
+                    && document.getElementById('stop-label').textContent === 'Stopping…'
+                    && document.getElementById('devices').disabled
+                    && getComputedStyle(stop.querySelector('.stop-spinner')).display !== 'none'
+                    && getComputedStyle(stop.querySelector('.stop-icon')).display === 'none'
+                    && document.documentElement.scrollWidth <= innerWidth;
+                })()
+                """)
+            XCTAssertEqual(feedback as? Bool, true)
+            try await wait(view, "!document.getElementById('start').disabled && document.getElementById('stop').hidden")
+            let stops = await backend.stops
+            XCTAssertEqual(stops, 1)
+            view.stopLoading()
+            _ = try await view.evaluateJavaScript("window.dispatchEvent(new Event('pagehide'))")
+            await server.shutdown()
+        } catch {
+            view.stopLoading()
+            await server.shutdown()
+            throw error
+        }
+    }
+
+    @MainActor
     private func wait(_ view: WKWebView, _ expression: String) async throws {
         for _ in 0..<100 {
             if (try? await view.evaluateJavaScript(expression)) as? Bool == true { return }

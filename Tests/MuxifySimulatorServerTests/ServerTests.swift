@@ -98,6 +98,47 @@ final class ServerTests: XCTestCase {
         XCTAssertTrue(backend.input.closed)
     }
 
+    func testStopPublishesProgressBeforeShutdownCompletesAndReachesPeers() async throws {
+        let backend = SuspendedStopBackend(), sessions = DeviceSessions(backend: backend)
+        let sinkA = MessageSink(), sinkB = MessageSink()
+        let a = SimulatorSession(backend: backend, sessions: sessions) { await sinkA.append($0) }
+        let b = SimulatorSession(backend: backend, sessions: sessions) { await sinkB.append($0) }
+        await a.handle(.select(deviceA))
+        await b.handle(.select(deviceA))
+        let stop = Task { await a.handle(.stop) }
+        await backend.waitUntilStopping()
+        let stopping = await sinkA.lastState()
+        XCTAssertEqual(stopping["status"] as? String, "stopping")
+        XCTAssertEqual(stopping["selected"] as? String, deviceA)
+        await b.streamFrame()
+        let peer = await sinkB.lastState()
+        XCTAssertEqual(peer["status"] as? String, "stopping")
+        await backend.finishStop()
+        await stop.value
+        let stopped = await sinkA.lastState(), stops = await backend.base.stops
+        XCTAssertEqual(stopped["status"] as? String, "stopped")
+        XCTAssertEqual(stops, 1)
+        await a.close(); await b.close()
+    }
+
+    func testFailedStopPublishesErrorInsteadOfRemainingStopping() async throws {
+        let backend = SuspendedStopBackend(fail: true), sink = MessageSink()
+        let session = SimulatorSession(backend: backend, sessions: DeviceSessions(backend: backend)) { await sink.append($0) }
+        await session.handle(.select(deviceA))
+        let stop = Task { await session.handle(.stop) }
+        await backend.waitUntilStopping()
+        let stopping = await sink.lastState()
+        XCTAssertEqual(stopping["status"] as? String, "stopping")
+        await backend.finishStop()
+        await stop.value
+        let failed = await sink.lastState()
+        XCTAssertEqual(failed["status"] as? String, "unavailable")
+        XCTAssertEqual(failed["message"] as? String, "Could not stop Device.")
+        let state = await backend.base.state
+        XCTAssertEqual(state, .booted)
+        await session.close()
+    }
+
     func testExternalShutdownDoesNotAutoRestart() async throws {
         let backend = MockBackend(state: .booted), sink = MessageSink()
         let session = SimulatorSession(backend: backend, sessions: DeviceSessions(backend: backend)) { await sink.append($0) }
@@ -378,6 +419,38 @@ private actor MessageSink {
 
 private struct FakeEncoder: FrameEncoding {
     func encode(_ frame: DisplayFrame, orientation: DeviceOrientation) throws -> Data { Data([0xff,0xd8,0xff,0xd9]) }
+}
+
+private actor SuspendedStopBackend: SimulatorBackendProtocol {
+    nonisolated let base = MockBackend(state: .booted)
+    private let fail: Bool
+    private var stopping = false
+    private var observer: CheckedContinuation<Void, Never>?
+    private var completion: CheckedContinuation<Void, Never>?
+
+    init(fail: Bool = false) { self.fail = fail }
+    func devices() async -> [DeviceInfo] { await base.devices() }
+    func connect(udid: String, startIfNeeded: Bool) async throws -> SimulatorConnection {
+        try await base.connect(udid: udid, startIfNeeded: startIfNeeded)
+    }
+    func rotate(udid: String, to orientation: DeviceOrientation) async throws -> DeviceOrientation {
+        try await base.rotate(udid: udid, to: orientation)
+    }
+    func stop(udid: String) async throws {
+        await withCheckedContinuation {
+            completion = $0
+            stopping = true
+            observer?.resume(); observer = nil
+        }
+        if fail { throw SimulatorError.message("Could not stop Device.") }
+        await base.stop(udid: udid)
+    }
+    func waitUntilStopping() async {
+        if stopping { return }
+        await withCheckedContinuation { observer = $0 }
+    }
+    func finishStop() { completion?.resume(); completion = nil }
+    func forget(udid: String) async { await base.forget(udid: udid) }
 }
 
 actor MockBackend: SimulatorBackendProtocol {

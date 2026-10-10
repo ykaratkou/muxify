@@ -66,6 +66,11 @@ button svg {
   stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
 #start svg, #stop svg { fill: currentColor; stroke: none; }
+#stop .stop-spinner { display: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-dasharray: 26 12; }
+#stop.stopping .stop-spinner { display: block; animation: spin 1s linear infinite; }
+#stop.stopping .stop-icon, #stop.stopping .wide-label { display: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { #stop.stopping .stop-spinner { animation: none; } }
 button:disabled { opacity: .4; cursor: default; }
 button:not(:disabled):hover { background: var(--hover); }
 button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }

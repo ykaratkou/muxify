@@ -30,8 +30,9 @@
             <span>Start<span class="wide-label"> Device</span></span>
           </button>
           <button id="stop" aria-label="Stop Device" disabled>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1"/></svg>
-            <span>Stop<span class="wide-label"> Device</span></span>
+            <svg class="stop-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1"/></svg>
+            <svg class="stop-spinner" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6"/></svg>
+            <span><span id="stop-label">Stop</span><span class="wide-label"> Device</span></span>
           </button>
           <span class="divider" aria-hidden="true"></span>
           <button id="home" disabled title="Go to Home screen">
