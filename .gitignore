@@ -6,3 +6,4 @@ xcuserdata/
 __pycache__/
 /.build/
 /.swiftpm/
+.scratch
