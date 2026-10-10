@@ -369,8 +369,8 @@ struct AgentRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if let color = agent.dotColor {
-                StatusDot(color: color, breathes: agent.status == .working)
+            if let marker = AgentStatusMarker(status: agent.status, unread: agent.unread) {
+                AgentStatusIndicator(marker: marker)
             }
         }
         .padding(.horizontal, 8)
@@ -383,38 +383,6 @@ struct AgentRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
         .onHover { hovering = $0 }
         .help("\(agent.kind.displayName) — \(agent.status?.rawValue ?? "no status yet")\(agent.unread ? ", unread" : "")")
-    }
-}
-
-/// An Agent's Status dot. A working Agent's dot breathes, fading to a third
-/// and shrinking a little every 1.6s, so movement always means busy. Every
-/// working dot reads the same clock, so they breathe together.
-private struct StatusDot: View {
-    let color: Color
-    let breathes: Bool
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let period: TimeInterval = 1.6
-
-    var body: some View {
-        if breathes, !reduceMotion {
-            // 30 fps is plenty for a slow fade, and Agents can work for hours.
-            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
-                let wave = cos(2 * .pi * context.date.timeIntervalSinceReferenceDate / Self.period)
-                dot
-                    .opacity(0.675 + 0.325 * wave)
-                    .scaleEffect(0.89 + 0.11 * wave)
-            }
-        } else {
-            dot
-        }
-    }
-
-    private var dot: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 7, height: 7)
     }
 }
 
@@ -457,19 +425,5 @@ struct Logo: View {
         let image = url.flatMap(NSImage.init(contentsOf:))
         cache[name] = image
         return image
-    }
-}
-
-private extension Agent {
-    /// Working blue, blocked orange, failed red, done green while unread.
-    /// A read Agent that is done (or hasn't run a turn) gets no dot.
-    var dotColor: Color? {
-        switch status {
-        case .working: return .blue
-        case .blocked: return .orange
-        case .failed: return .red
-        case .done: return unread ? .green : nil
-        case nil: return nil
-        }
     }
 }

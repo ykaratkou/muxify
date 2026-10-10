@@ -257,7 +257,7 @@ private struct SelectedRowBounds: PreferenceKey {
 /// program's logo (and the Agent's Status as a badge), Sessions as a folder,
 /// Session Paths as an empty folder or a branch, actions as a tile in a
 /// theme color.
-private struct PaletteIcon: View {
+struct PaletteIcon: View {
     enum Source {
         case item(PaletteItem)
         case action(PaletteAction)
@@ -286,10 +286,19 @@ private struct PaletteIcon: View {
                 .overlay(Logo(name: item.logo ?? "terminal", size: size * 0.56))
                 .frame(width: size, height: size)
                 .overlay(alignment: .bottomTrailing) {
-                    if let color = theme.status(item.status, unread: item.unread) {
-                        Circle().fill(color)
-                            .frame(width: size * 0.36, height: size * 0.36)
-                            .overlay(Circle().strokeBorder(theme.background, lineWidth: 2))
+                    if let marker = AgentStatusMarker(status: item.status, unread: item.unread) {
+                        AgentStatusIndicator(marker: marker, dotSize: size * 0.36)
+                            .padding(marker == .working ? 2 : 0)
+                            .background {
+                                if marker == .working {
+                                    RoundedRectangle(cornerRadius: 3).fill(theme.background)
+                                }
+                            }
+                            .overlay {
+                                if marker != .working {
+                                    Circle().strokeBorder(theme.background, lineWidth: 2)
+                                }
+                            }
                             .offset(x: size * 0.1, y: size * 0.1)
                     }
                 }

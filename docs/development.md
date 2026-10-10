@@ -12,6 +12,16 @@ through Extensions installed into each Agent's own hook or plugin system.
 
 See [CONTEXT.md](../CONTEXT.md) for vocabulary and [ADRs](adr) for design decisions.
 
+### Agent indicators
+
+The Sidebar and Command Palette use the same Agent indicators: separate gray
+3 pt square pixels on a three-by-three square perimeter, 10×10 pt overall, light
+up clockwise in discrete steps to mean working. A blue dot means an Unread
+completion, and an orange dot means blocked or failed (even when Unread). A read,
+done Agent or one that has not run a turn has no indicator. Reduce Motion keeps
+the working pixel glyph static. Green is not an Agent Status color; these
+presentation rules do not change the Status or Unread pane options.
+
 ## Build
 
 Requires macOS 14+ on Apple silicon, Xcode 26+, and Homebrew. Running the app

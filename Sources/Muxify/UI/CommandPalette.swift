@@ -556,14 +556,9 @@ struct PaletteTheme {
     var magenta: Color { ansi(5) }
     var cyan: Color { ansi(6) }
 
-    /// Same meaning as the Sidebar's dots, in the theme's colors.
+    /// Status hues keep the same meaning as the Sidebar, independent of ANSI
+    /// colors: monochrome working, blue Unread, orange blocked or failed.
     func status(_ status: AgentStatus?, unread: Bool) -> Color? {
-        switch status {
-        case .working: blue
-        case .blocked: yellow
-        case .failed: red
-        case .done: unread ? green : nil
-        case nil: nil
-        }
+        AgentStatusMarker(status: status, unread: unread)?.color
     }
 }
