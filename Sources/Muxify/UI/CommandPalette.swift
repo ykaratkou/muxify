@@ -244,7 +244,7 @@ final class CommandPalette {
     }
     var showsActions = false
     var actionIndex = 0
-    /// What the last Copy put on the pasteboard, shown briefly where the palette was.
+    /// What the last Copy put on the pasteboard, shown briefly at the App Window's bottom.
     private(set) var copied: PaletteCopy?
 
     @ObservationIgnored weak var store: WorkspaceStore?
@@ -373,16 +373,23 @@ final class CommandPalette {
         }
     }
 
-    /// The palette fades out while the pill springs in where it was.
+    /// The palette fades out while the pill springs in at the App Window's bottom.
     private func copy(_ value: String, title: String, shown: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
         withAnimation(.easeOut(duration: 0.12)) { close() }
+        showCopied(title: title, value: shown)
+    }
+
+    /// Shared by palette and Browser copies, without taking keyboard focus.
+    func showCopied(title: String, value: String) {
         copiedWork?.cancel()
-        withAnimation(.spring(duration: 0.4, bounce: 0.35)) { copied = PaletteCopy(title: title, value: shown) }
+        let confirmation = PaletteCopy(title: title, value: value)
+        withAnimation(.spring(duration: 0.4, bounce: 0.35)) { copied = confirmation }
         let work = DispatchWorkItem { [weak self] in
             MainActor.assumeIsolated {
-                withAnimation(.easeIn(duration: 0.2)) { self?.copied = nil }
+                guard let self, self.copied?.id == confirmation.id else { return }
+                withAnimation(.easeIn(duration: 0.2)) { self.copied = nil }
             }
         }
         copiedWork = work

@@ -16,6 +16,7 @@ final class Browser {
     var wantsAddressFocus = false
 
     @ObservationIgnored var onChange: ((Browser) -> Void)?
+    @ObservationIgnored var onCopyURL: ((String) -> Void)?
 
     init(windowID: String, stored: StoredBrowser, discoversLocalServers: Bool = true) {
         self.windowID = windowID
@@ -128,6 +129,7 @@ final class Browser {
         let tab = BrowserTab(url: url)
         tab.onOpenInNewTab = { [weak self] in self?.open($0) }
         tab.onURLChange = { [weak self] in self?.changed() }
+        tab.onCopyURL = { [weak self] in self?.onCopyURL?($0) }
         return tab
     }
 

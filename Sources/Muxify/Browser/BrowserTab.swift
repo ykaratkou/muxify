@@ -29,6 +29,8 @@ final class BrowserTab: NSObject, Identifiable {
     @ObservationIgnored var onOpenInNewTab: ((URL) -> Void)?
     /// The Tab's URL changed (for persisting the Browser).
     @ObservationIgnored var onURLChange: (() -> Void)?
+    /// The current URL was copied, for the App Window's confirmation pill.
+    @ObservationIgnored var onCopyURL: ((String) -> Void)?
 
     @ObservationIgnored private var loadedWebView: WKWebView?
     @ObservationIgnored private var pendingURL: URL?
@@ -159,9 +161,13 @@ final class BrowserTab: NSObject, Identifiable {
     }
 
     func copyURL() {
+        copyURL(to: .general)
+    }
+
+    func copyURL(to pasteboard: NSPasteboard) {
         guard hasPage else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(urlString, forType: .string)
+        pasteboard.clearContents()
+        if pasteboard.setString(urlString, forType: .string) { onCopyURL?(urlString) }
     }
 }
 

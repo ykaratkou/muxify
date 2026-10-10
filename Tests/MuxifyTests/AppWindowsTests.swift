@@ -237,6 +237,37 @@ final class AppWindowsTests: XCTestCase {
         }
     }
 
+    @MainActor func testBrowserURLCopiesShowTheSharedPillOnlyInTheirOwnAppWindow() throws {
+        try withWindows { windows, _ in
+            let first = windows.store(for: AppWindowRequest())
+            let second = windows.store(for: AppWindowRequest())
+            let pasteboard = NSPasteboard.withUniqueName()
+            defer { pasteboard.releaseGlobally() }
+            let browser = first.browser(for: "@1")
+            let firstURL = "https://example.com/path"
+            browser.open(try XCTUnwrap(URL(string: firstURL)))
+
+            try XCTUnwrap(browser.activeTab).copyURL(to: pasteboard)
+
+            let confirmation = try XCTUnwrap(first.palette.copied)
+            XCTAssertEqual(confirmation.title, "Copied URL")
+            XCTAssertEqual(confirmation.value, firstURL)
+            XCTAssertNil(second.palette.copied)
+            XCTAssertFalse(first.palette.isOpen, "Showing the pill must not open the palette")
+
+            browser.newTab()
+            let secondURL = "https://example.org/another"
+            try XCTUnwrap(browser.activeTab).load(try XCTUnwrap(URL(string: secondURL)))
+            try XCTUnwrap(browser.activeTab).copyURL(to: pasteboard)
+
+            let replacement = try XCTUnwrap(first.palette.copied)
+            XCTAssertEqual(replacement.value, secondURL)
+            XCTAssertNotEqual(replacement.id, confirmation.id, "Every copy should replay the pill's animation")
+            XCTAssertEqual(pasteboard.string(forType: .string), secondURL)
+            XCTAssertNil(second.palette.copied)
+        }
+    }
+
     @MainActor func testOnlyOneWindowPerEnvironmentConsumesBrowserRequests() throws {
         try withWindows { windows, _ in
             let firstRequest = AppWindowRequest()

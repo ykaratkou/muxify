@@ -65,6 +65,9 @@ import SwiftUI
                 .keyboardShortcut("]", modifiers: .command)
             Button("Reload Page") { store?.browserCommand { $0.activeTab?.reloadOrStop() } }
                 .keyboardShortcut("r", modifiers: .command)
+            Button("Copy URL") { store?.browserCommand { $0.activeTab?.copyURL() } }
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .disabled(store?.currentBrowser?.activeTab?.hasPage != true)
             Divider()
             Button("Focus Terminal") { store?.focusTerminal() }
                 .keyboardShortcut(keybinds.firstTrigger(for: .focusTerminal)?.shortcut)

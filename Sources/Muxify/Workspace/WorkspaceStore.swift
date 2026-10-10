@@ -790,6 +790,10 @@ final class WorkspaceStore {
             guard let self, self.generation == current else { return }
             persistWindow(browser.windowID)
         }
+        browser.onCopyURL = { [weak self] url in
+            guard let self, self.generation == current else { return }
+            self.palette.showCopied(title: "Copied URL", value: url)
+        }
         browsers[windowID] = browser
         return browser
     }

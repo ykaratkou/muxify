@@ -126,6 +126,7 @@ when it does not. New Tab and Open Location can reveal a hidden Browser:
 | ⌘[ | Go back |
 | ⌘] | Go forward |
 | ⌘R | Reload the page, or stop it while loading |
+| ⌘⇧C | Copy the active Browser Tab's current URL and show a “Copied URL” confirmation |
 | Enter (address bar) | Navigate to the entered URL or search |
 | Escape (address bar) | Restore the current URL and focus the page |
 
