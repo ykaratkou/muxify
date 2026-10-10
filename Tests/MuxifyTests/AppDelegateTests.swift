@@ -15,6 +15,21 @@ final class AppDelegateTests: XCTestCase {
         XCTAssertEqual(delivered, [url, url])
     }
 
+    @MainActor func testSwiftUIAndAppKitUrlsShareTheLaunchQueue() throws {
+        let delegate = AppDelegate()
+        let first = try XCTUnwrap(URL(string: "muxify://select?session=first"))
+        let second = try XCTUnwrap(URL(string: "muxify://select?session=second"))
+        delegate.receive([first])
+        delegate.application(NSApplication.shared, open: [second])
+        var delivered: [URL] = []
+        delegate.openURLs = { delivered += $0 }
+        XCTAssertEqual(delivered, [first, second])
+        delegate.receive([first])
+        // SwiftUI-consumed URLs leave AppKit an empty batch, not a second copy.
+        delegate.application(NSApplication.shared, open: [])
+        XCTAssertEqual(delivered, [first, second, first])
+    }
+
     @MainActor func testQuitWithoutAWorkspaceCanTerminateImmediately() {
         let delegate = AppDelegate()
         XCTAssertEqual(delegate.requestTermination { XCTFail("No deferred reply is needed") }, .terminateNow)

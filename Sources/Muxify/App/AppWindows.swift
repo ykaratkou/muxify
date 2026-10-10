@@ -7,7 +7,7 @@ import Observation
 @MainActor @Observable
 final class AppWindows {
     let configStore: ConfigStore
-    let initialRequest: AppWindowRequest
+    @ObservationIgnored private let initialEnvironmentName: String?
     private(set) var focusedID: UUID?
     @ObservationIgnored var openWindow: ((AppWindowRequest) -> Void)?
     @ObservationIgnored private var catalog = AppWindowCatalog()
@@ -23,11 +23,17 @@ final class AppWindows {
         self.configStore = configStore
         let remembered = UserDefaults.standard.string(forKey: "selectedEnvironment")
         let name = configStore.config.remoteEnvironments.first { $0.name == remembered }?.name
-        initialRequest = AppWindowRequest(environmentName: name)
+        initialEnvironmentName = name
     }
 
     deinit {
         for tokens in observers.values { tokens.forEach(NotificationCenter.default.removeObserver) }
+    }
+
+    /// SwiftUI may create scenes without an explicit value, including at launch.
+    /// Every such scene needs its own terminal host, never the launch scene's ID.
+    func defaultWindowRequest() -> AppWindowRequest {
+        AppWindowRequest(environmentName: catalog.requests.isEmpty ? initialEnvironmentName : nil)
     }
 
     func store(for request: AppWindowRequest) -> WorkspaceStore {
@@ -82,8 +88,11 @@ final class AppWindows {
     }
 
     func register(_ window: NSWindow, for id: UUID) {
-        guard !isQuitting, !closedIDs.contains(id), nativeWindows[id] !== window else { return }
-        observers[id]?.forEach(NotificationCenter.default.removeObserver)
+        guard !isQuitting, !closedIDs.contains(id) else { return }
+        if let existing = nativeWindows[id] {
+            if existing !== window { NSLog("muxify: refusing duplicate App Window identity \(id)") }
+            return
+        }
         nativeWindows[id] = window
         window.tabbingMode = .disallowed
         let center = NotificationCenter.default

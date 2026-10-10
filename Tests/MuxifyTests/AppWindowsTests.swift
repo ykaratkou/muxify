@@ -9,6 +9,110 @@ final class AppWindowsTests: XCTestCase {
         username: test
     """
 
+    @MainActor func testDefaultScenesHaveIndependentStoresAndTerminalHosts() throws {
+        try withWindows { windows, _ in
+            let firstRequest = windows.defaultWindowRequest()
+            let first = windows.store(for: firstRequest)
+            let secondRequest = windows.defaultWindowRequest()
+            let second = windows.store(for: secondRequest)
+            XCTAssertNotEqual(firstRequest.id, secondRequest.id)
+            XCTAssertFalse(first === second)
+            XCTAssertFalse(first.terminalHost === second.terminalHost)
+
+            let firstWindow = FocusWindow()
+            let secondWindow = FocusWindow()
+            firstWindow.contentView = first.terminalHost
+            secondWindow.contentView = second.terminalHost
+            defer { firstWindow.contentView = nil; secondWindow.contentView = nil }
+            XCTAssertTrue(first.terminalHost.window === firstWindow)
+            XCTAssertTrue(second.terminalHost.window === secondWindow)
+        }
+    }
+
+    @MainActor func testOnlyFirstDefaultSceneUsesTheRememberedEnvironment() throws {
+        try withWindows { windows, _ in
+            UserDefaults.standard.set("Home", forKey: "selectedEnvironment")
+            let remembered = AppWindows(configStore: windows.configStore)
+            let first = remembered.defaultWindowRequest()
+            XCTAssertEqual(first.environmentName, "Home")
+            _ = remembered.store(for: first)
+            let second = remembered.defaultWindowRequest()
+            XCTAssertNotEqual(first.id, second.id)
+            XCTAssertNil(second.environmentName)
+            let finished = expectation(description: "remembered workspace cleanup")
+            remembered.shutdown { finished.fulfill() }
+            wait(for: [finished], timeout: 3)
+        }
+    }
+
+    @MainActor func testDuplicateNativeRegistrationCannotReplaceTheOwningWindow() throws {
+        try withWindows { windows, _ in
+            let request = windows.defaultWindowRequest()
+            let store = windows.store(for: request)
+            let owner = FocusWindow()
+            let duplicate = FocusWindow()
+            owner.contentView = store.terminalHost
+            defer { owner.contentView = nil }
+            windows.register(owner, for: request.id)
+            windows.register(duplicate, for: request.id)
+            windows.openWindow = { _ in XCTFail("The original native window must remain registered") }
+            NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: duplicate)
+            windows.selectEnvironment(named: nil)
+            XCTAssertEqual(owner.focusRequests, 1)
+            XCTAssertEqual(duplicate.focusRequests, 0)
+            XCTAssertTrue(windows.focusedStore === store)
+            XCTAssertTrue(store.terminalHost.window === owner)
+        }
+    }
+
+    @MainActor func testRepeatedSessionUrlsFocusTheExistingLocalWithoutMovingItsTerminalHost() throws {
+        try withWindows { windows, _ in
+            let firstRequest = windows.defaultWindowRequest()
+            let first = windows.store(for: firstRequest)
+            let firstWindow = FocusWindow()
+            firstWindow.contentView = first.terminalHost
+            let secondRequest = AppWindowRequest()
+            let second = windows.store(for: secondRequest)
+            let secondWindow = FocusWindow()
+            secondWindow.contentView = second.terminalHost
+            defer { firstWindow.contentView = nil; secondWindow.contentView = nil }
+            windows.register(firstWindow, for: firstRequest.id)
+            windows.register(secondWindow, for: secondRequest.id)
+            firstWindow.makeKeyAndOrderFront(nil)
+            windows.openWindow = { _ in XCTFail("A session URL must reuse the focused Local App Window") }
+            let url = try XCTUnwrap(URL(string: "muxify://select?session=my%20project"))
+            for _ in 0..<3 { windows.handle(url) }
+            XCTAssertEqual(firstWindow.focusRequests, 4)
+            XCTAssertEqual(secondWindow.focusRequests, 0)
+            XCTAssertTrue(windows.focusedStore === first)
+            XCTAssertTrue(first.terminalHost.window === firstWindow)
+            XCTAssertTrue(second.terminalHost.window === secondWindow)
+        }
+    }
+
+    @MainActor func testSessionUrlReusesLocalWhenRemoteIsFocused() throws {
+        try withWindows { windows, _ in
+            let localRequest = AppWindowRequest()
+            let local = windows.store(for: localRequest)
+            let remoteRequest = AppWindowRequest(environmentName: "Home")
+            let remote = windows.store(for: remoteRequest)
+            let localWindow = FocusWindow()
+            let remoteWindow = FocusWindow()
+            localWindow.contentView = local.terminalHost
+            remoteWindow.contentView = remote.terminalHost
+            defer { localWindow.contentView = nil; remoteWindow.contentView = nil }
+            windows.register(localWindow, for: localRequest.id)
+            windows.register(remoteWindow, for: remoteRequest.id)
+            remoteWindow.makeKeyAndOrderFront(nil)
+            windows.openWindow = { _ in XCTFail("A Local App Window already exists") }
+            windows.handle(try XCTUnwrap(URL(string: "muxify://select?session=main")))
+            XCTAssertEqual(localWindow.focusRequests, 1)
+            XCTAssertTrue(windows.focusedStore === local)
+            XCTAssertEqual(remote.environmentName, "Home")
+            XCTAssertTrue(remote.terminalHost.window === remoteWindow)
+        }
+    }
+
     @MainActor func testRemoteSelectionOpensOnceAndLeavesTheOriginalWorkspaceLocal() throws {
         try withWindows { windows, _ in
             let original = windows.store(for: AppWindowRequest())
@@ -327,6 +431,7 @@ final class AppWindowsTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let path = directory.appendingPathComponent("config.yaml").path
         try Self.config.write(toFile: path, atomically: true, encoding: .utf8)
+        defaults.removeObject(forKey: "selectedEnvironment")
         let windows = AppWindows(configStore: ConfigStore(path: path))
         defer {
             let finished = expectation(description: "fixture window cleanup")

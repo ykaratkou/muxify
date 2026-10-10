@@ -18,12 +18,17 @@ struct MuxifyApp: App {
     var body: some Scene {
         WindowGroup("Muxify", id: "workspace", for: AppWindowRequest.self) { request in
             AppWindowView(request: request.wrappedValue, windows: windows)
+                // Otherwise SwiftUI creates a new scene for each muxify:// URL
+                // even though AppDelegate already routes it through AppWindows.
+                .handlesExternalEvents(preferring: windows.focusedID == request.wrappedValue.id ? ["*"] : [],
+                                       allowing: ["*"])
+                .onOpenURL { appDelegate.receive([$0]) }
                 .onAppear {
                     appDelegate.shutdown = windows.shutdown
                     appDelegate.openURLs = { $0.forEach(windows.handle) }
                 }
         } defaultValue: {
-            windows.initialRequest
+            windows.defaultWindowRequest()
         }
         .defaultSize(width: 1500, height: 920)
         .windowStyle(.hiddenTitleBar)

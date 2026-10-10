@@ -13,6 +13,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func application(_ application: NSApplication, open urls: [URL]) {
+        receive(urls)
+    }
+
+    /// SwiftUI consumes URLs handled by onOpenURL; AppKit delivers any others.
+    /// Both paths share the launch queue, before App Windows routing is ready.
+    func receive(_ urls: [URL]) {
         pendingURLs += urls
         deliverURLs()
     }
