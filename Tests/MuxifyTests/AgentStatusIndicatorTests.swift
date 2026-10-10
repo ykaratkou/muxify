@@ -111,38 +111,55 @@ final class AgentStatusIndicatorTests: XCTestCase {
 
     @MainActor func testWorkingGlyphDrawsEightSeparateSquareBlocksNotAnOutline() throws {
         for scheme in [ColorScheme.light, .dark] {
-            let image = try render(TerminalActivityGlyph(phase: 0), scheme: scheme)
-            let background = try color(image, x: 0, y: 0).redComponent
-            var remaining = Set(try pixels(image).enumerated().compactMap { index, red in
-                abs(red - background) > 0.04 ? index : nil
-            })
-            var blocks = 0
-            while let first = remaining.first {
-                remaining.remove(first)
-                var pending = [first]
-                var xs: [Int] = []
-                var ys: [Int] = []
-                while let pixel = pending.popLast() {
-                    let x = pixel % image.pixelsWide
-                    let y = pixel / image.pixelsWide
-                    xs.append(x)
-                    ys.append(y)
-                    for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                        let nextX = x + dx
-                        let nextY = y + dy
-                        guard (0..<image.pixelsWide).contains(nextX), (0..<image.pixelsHigh).contains(nextY) else { continue }
-                        let next = nextY * image.pixelsWide + nextX
-                        if remaining.remove(next) != nil { pending.append(next) }
-                    }
+            let native = try render(TerminalActivityGlyph(phase: 0), scheme: scheme)
+            let nativeScale = CGFloat(native.pixelsWide) / 32
+            try assertSeparateBlocks(native, expectedSize: nativeScale == 1 ? 2 : 3)
+            for scale in [CGFloat(1), 2] {
+                for phase in [0.0, 0.25, 0.92] {
+                    let image = try render(TerminalActivityGlyph(phase: phase), scheme: scheme, scale: scale)
+                    XCTAssertEqual(image.pixelsWide, Int(32 * scale))
+                    XCTAssertEqual(image.pixelsHigh, Int(24 * scale))
+                    try assertSeparateBlocks(image, expectedSize: scale == 1 ? 2 : 3)
                 }
-                XCTAssertEqual(xs.max()! - xs.min()!, ys.max()! - ys.min()!, "Each disconnected block must be square")
-                let scale = CGFloat(image.pixelsWide) / 32
-                XCTAssertEqual(CGFloat(xs.max()! - xs.min()! + 1) / scale, 3,
-                               "The rendered blocks must be larger while retaining their gaps")
-                blocks += 1
             }
-            XCTAssertEqual(blocks, 8, "The pixels must have visible gaps, not form a continuous outline")
         }
+    }
+
+    private func assertSeparateBlocks(_ image: NSBitmapImageRep, expectedSize: CGFloat,
+                                      file: StaticString = #filePath, line: UInt = #line) throws {
+        let background = try color(image, x: 0, y: 0).redComponent
+        var remaining = Set(try pixels(image).enumerated().compactMap { index, red in
+            abs(red - background) > 0.04 ? index : nil
+        })
+        var blocks = 0
+        while let first = remaining.first {
+            remaining.remove(first)
+            var pending = [first]
+            var xs: [Int] = []
+            var ys: [Int] = []
+            while let pixel = pending.popLast() {
+                let x = pixel % image.pixelsWide
+                let y = pixel / image.pixelsWide
+                xs.append(x)
+                ys.append(y)
+                for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                    let nextX = x + dx
+                    let nextY = y + dy
+                    guard (0..<image.pixelsWide).contains(nextX), (0..<image.pixelsHigh).contains(nextY) else { continue }
+                    let next = nextY * image.pixelsWide + nextX
+                    if remaining.remove(next) != nil { pending.append(next) }
+                }
+            }
+            XCTAssertEqual(xs.max()! - xs.min()!, ys.max()! - ys.min()!, "Each disconnected block must be square",
+                           file: file, line: line)
+            let scale = CGFloat(image.pixelsWide) / 32
+            XCTAssertEqual(CGFloat(xs.max()! - xs.min()! + 1) / scale, expectedSize,
+                           "The rendered blocks must retain their gaps at each display scale",
+                           file: file, line: line)
+            blocks += 1
+        }
+        XCTAssertEqual(blocks, 8, "The pixels must have visible gaps, not form a continuous outline",
+                       file: file, line: line)
     }
 
     @MainActor func testReduceMotionUsesTheStaticPixelGlyph() throws {
@@ -205,12 +222,20 @@ final class AgentStatusIndicatorTests: XCTestCase {
     }
 
     /// Native production rendering without Ghostty, tmux or a visible window.
+    /// An explicit scale renders independently of the machine's attached display.
     @MainActor private func render<V: View>(_ view: V, scheme: ColorScheme,
-                                           width: CGFloat = 32, height: CGFloat = 24) throws -> NSBitmapImageRep {
+                                           width: CGFloat = 32, height: CGFloat = 24,
+                                           scale: CGFloat? = nil) throws -> NSBitmapImageRep {
         _ = NSApplication.shared
-        let host = NSHostingView(rootView: view.frame(width: width, height: height)
+        let content = view.frame(width: width, height: height)
             .background(scheme == .dark ? Color(white: 0.12) : Color.white)
-            .environment(\.colorScheme, scheme))
+            .environment(\.colorScheme, scheme)
+        if let scale {
+            let renderer = ImageRenderer(content: content.environment(\.displayScale, scale))
+            renderer.scale = scale
+            return NSBitmapImageRep(cgImage: try XCTUnwrap(renderer.cgImage))
+        }
+        let host = NSHostingView(rootView: content)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height),
                               styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false

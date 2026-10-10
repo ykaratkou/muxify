@@ -71,7 +71,6 @@ struct TerminalActivityGlyph: View {
     @Environment(\.displayScale) private var displayScale
 
     static let blockSize: CGFloat = 3
-    private static let pitch: CGFloat = 3.5
 
     static let cells: [CGPoint] = [
         CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0), CGPoint(x: 2, y: 0), CGPoint(x: 2, y: 1),
@@ -88,9 +87,16 @@ struct TerminalActivityGlyph: View {
     var body: some View {
         Canvas { context, size in
             let head = Self.head(at: phase)
-            let extent = 2 * Self.pitch + Self.blockSize
-            // Keep the half-point gaps crisp on Retina displays rather than
-            // blurring adjacent blocks together at a fractional pixel origin.
+            // Reserve a physical pixel for each gap. At 1×, use 2 pt blocks so
+            // all eight stay separate within the same 10 pt footprint; at 2×,
+            // retain the 3 pt blocks and half-point gaps.
+            let gap = 1 / displayScale
+            let availablePixels = min(size.width, size.height) * displayScale - 2
+            let blockSize = min(Self.blockSize, floor(availablePixels / 3) / displayScale)
+            let pitch = blockSize + gap
+            let extent = 2 * pitch + blockSize
+            // Align the entire grid to physical pixels to avoid antialiasing
+            // that would blur adjacent blocks together.
             let origin = CGPoint(x: ((size.width - extent) / 2 * displayScale).rounded() / displayScale,
                                  y: ((size.height - extent) / 2 * displayScale).rounded() / displayScale)
             for (index, cell) in Self.cells.enumerated() {
@@ -102,8 +108,8 @@ struct TerminalActivityGlyph: View {
                 case 2: opacity = 0.32
                 default: opacity = 0.16
                 }
-                let block = CGRect(x: origin.x + cell.x * Self.pitch, y: origin.y + cell.y * Self.pitch,
-                                   width: Self.blockSize, height: Self.blockSize)
+                let block = CGRect(x: origin.x + cell.x * pitch, y: origin.y + cell.y * pitch,
+                                   width: blockSize, height: blockSize)
                 context.fill(Path(block), with: .color(.primary.opacity(opacity)))
             }
         }
