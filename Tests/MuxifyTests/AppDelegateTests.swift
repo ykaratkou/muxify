@@ -2,6 +2,15 @@ import AppKit
 import XCTest
 
 final class AppDelegateTests: XCTestCase {
+    @MainActor func testFinalQuitRemovesTheAppFromTheDock() {
+        let app = NSApplication.shared
+        let previous = app.activationPolicy()
+        defer { app.setActivationPolicy(previous) }
+        app.setActivationPolicy(.regular)
+        AppDelegate().applicationWillTerminate(Notification(name: NSApplication.willTerminateNotification, object: app))
+        XCTAssertEqual(app.activationPolicy(), .prohibited)
+    }
+
     @MainActor func testLaunchUrlsAreQueuedUntilWindowRoutingIsReadyAndDeliveredOnce() throws {
         let delegate = AppDelegate()
         let url = try XCTUnwrap(URL(string: "muxify://select?session=main"))
